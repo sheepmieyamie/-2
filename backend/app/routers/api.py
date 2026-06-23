@@ -315,6 +315,23 @@ async def health():
     return {"status": "ok"}
 
 
+@router.get("/admin/stats")
+def admin_stats(db: Session = Depends(get_db)):
+    session_count = (
+        db.query(func.count(func.distinct(ChatMessage.session_id))).scalar() or 0
+    )
+    return {
+        "accounts": db.query(BenchmarkAccount).count(),
+        "notes": db.query(BenchmarkNote).count(),
+        "reference_posts": db.query(ReferencePost).count(),
+        "presets": db.query(ContentPreset).count(),
+        "chat_messages": db.query(ChatMessage).count(),
+        "chat_sessions": session_count,
+        "forbidden_words": len(forbidden_checker.forbidden_words),
+        "limit_words": len(forbidden_checker.limit_words),
+    }
+
+
 def _effective_note_count(profile_count: int, imported: int) -> int:
     """主页笔记数优先用接口字段，缺失时用已抓取数量兜底。"""
     return max(profile_count, imported)

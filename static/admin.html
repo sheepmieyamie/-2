@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数据后台 · 小红书内容库</title>
+  <style>
+    :root {
+      --bg: #f4f6f9; --surface: #fff; --border: #e4e8ef;
+      --text: #1a1a1a; --muted: #6b7280; --primary: #ff2442;
+      --ok: #16a34a; --warn: #d97706;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .header {
+      background: linear-gradient(135deg, #1e293b, #334155); color: #fff;
+      padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    .header h1 { font-size: 1.15rem; }
+    .header p { font-size: 0.8rem; opacity: 0.85; margin-top: 4px; }
+    .header-actions { display: flex; gap: 8px; align-items: center; }
+    .btn {
+      border: none; border-radius: 8px; padding: 8px 14px; font-size: 0.84rem; cursor: pointer;
+      background: var(--primary); color: #fff;
+    }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,0.5); color: #fff; }
+    .btn-ghost:hover { background: rgba(255,255,255,0.1); }
+    .status-pill {
+      font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; background: rgba(255,255,255,0.15);
+    }
+    .status-pill.ok { background: rgba(22,163,74,0.25); }
+    .status-pill.err { background: rgba(220,38,38,0.3); }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .stat-card .label { font-size: 0.75rem; color: var(--muted); }
+    .stat-card .value { font-size: 1.5rem; font-weight: 700; margin-top: 4px; }
+    .panel {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; margin-bottom: 16px;
+    }
+    .tabs { display: flex; border-bottom: 1px solid var(--border); overflow-x: auto; }
+    .tab {
+      padding: 12px 18px; font-size: 0.86rem; cursor: pointer; border: none; background: none;
+      color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap;
+    }
+    .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .panel-body { display: grid; grid-template-columns: 1fr 1fr; min-height: 420px; }
+    @media (max-width: 900px) { .panel-body { grid-template-columns: 1fr; } }
+    .list-pane { border-right: 1px solid var(--border); overflow-y: auto; max-height: 520px; }
+    .detail-pane { overflow-y: auto; max-height: 520px; padding: 16px; }
+    .list-item {
+      padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer;
+    }
+    .list-item:hover { background: #f8fafc; }
+    .list-item.active { background: #fff5f6; border-left: 3px solid var(--primary); }
+    .list-item strong { display: block; font-size: 0.88rem; margin-bottom: 4px; }
+    .list-item span { font-size: 0.75rem; color: var(--muted); }
+    .empty { padding: 40px 20px; text-align: center; color: var(--muted); font-size: 0.88rem; }
+    .detail-title { font-size: 1rem; font-weight: 600; margin-bottom: 12px; }
+    .detail-meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 12px; line-height: 1.6; }
+    .detail-block { margin-bottom: 16px; }
+    .detail-block h3 { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; }
+    pre {
+      background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; font-size: 0.78rem; line-height: 1.5; overflow: auto; max-height: 320px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .msg { margin-bottom: 10px; padding: 10px 12px; border-radius: 8px; font-size: 0.82rem; line-height: 1.5; }
+    .msg.user { background: #eff6ff; border-left: 3px solid #3b82f6; }
+    .msg.assistant { background: #f0fdf4; border-left: 3px solid var(--ok); }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .tag { background: #f1f5f9; border-radius: 12px; padding: 2px 8px; font-size: 0.72rem; color: #475569; }
+    .note-row { padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: 0.82rem; }
+    .note-row:last-child { border-bottom: none; }
+    .toolbar { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); }
+    .error-banner {
+      background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+      padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.86rem;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div>
+      <h1>数据后台</h1>
+      <p>查看对标账号、笔记、对话、参考帖与产品档案</p>
+    </div>
+    <div class="header-actions">
+      <span class="status-pill" id="healthPill">检测中…</span>
+      <button class="btn btn-ghost" type="button" id="refreshBtn">刷新</button>
+      <a href="/" class="btn btn-ghost" style="text-decoration:none;display:inline-block">返回前台</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div id="errorBanner" class="error-banner" hidden></div>
+    <div class="stats" id="stats"></div>
+
+    <div class="panel">
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="accounts">对标账号</button>
+        <button class="tab" data-tab="sessions">对话记录</button>
+        <button class="tab" data-tab="refposts">参考帖</button>
+        <button class="tab" data-tab="presets">产品档案</button>
+        <button class="tab" data-tab="words">违禁词库</button>
+      </div>
+      <div class="toolbar" id="toolbar">点击左侧条目查看详情</div>
+      <div class="panel-body">
+        <div class="list-pane" id="listPane"><div class="empty">加载中…</div></div>
+        <div class="detail-pane" id="detailPane"><div class="empty">选择一条记录查看详情</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = "/api";
+    let currentTab = "accounts";
+    let cache = { accounts: [], sessions: [], refposts: [], presets: [], words: null };
+    let selectedId = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(s) {
+      if (s == null) return "";
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function showError(msg) {
+      const el = $("errorBanner");
+      if (!msg) { el.hidden = true; return; }
+      el.textContent = msg;
+      el.hidden = false;
+    }
+
+    async function api(path) {
+      const res = await fetch(`${API}${path}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `请求失败 ${res.status}`);
+      return data;
+    }
+
+    async function loadHealth() {
+      try {
+        await api("/health");
+        $("healthPill").textContent = "服务正常";
+        $("healthPill").className = "status-pill ok";
+      } catch {
+        $("healthPill").textContent = "服务异常";
+        $("healthPill").className = "status-pill err";
+      }
+    }
+
+    async function loadStats() {
+      const s = await api("/admin/stats");
+      $("stats").innerHTML = [
+        ["对标账号", s.accounts],
+        ["笔记样本", s.notes],
+        ["对话会话", s.chat_sessions],
+        ["消息条数", s.chat_messages],
+        ["参考帖", s.reference_posts],
+        ["产品档案", s.presets],
+        ["违禁词", s.forbidden_words],
+        ["限流词", s.limit_words],
+      ].map(([label, value]) => `
+        <div class="stat-card"><div class="label">${label}</div><div class="value">${value}</div></div>
+      `).join("");
+    }
+
+    function renderList() {
+      const pane = $("listPane");
+      let html = "";
+      if (currentTab === "accounts") {
+        if (!cache.accounts.length) html = '<div class="empty">暂无对标账号</div>';
+        else html = cache.accounts.map(a => `
+          <div class="list-item ${selectedId === a.id ? "active" : ""}" data-id="${a.id}">
+            <strong>${escapeHtml(a.nickname || a.user_id)}</strong>
+            <span>ID ${a.id} · 粉丝 ${a.follower_count || 0} · 笔记 ${a.note_count || 0} · ${fmtTime(a.updated_at)}</span>
+          </div>
+        `).join("");
+      } else if (currentTab === "sessions") {
+        if (!cache.sessions.length) html = '<div class="empty">暂无对话</div>';
+        else html = cache.sessions.map(s => `
+          <div class="list-item ${selectedId === s.session_id ? "active" : ""}" data-id="${escapeHtml(s.session_id)}">
+            <strong>${escapeHtml(s.title)}</strong>
+            <span>${s.message_count} 条 · ${escapeHtml(s.account_name || "未关联账号")} · ${fmtTime(s.updated_at)}</span>
+          </div>
+        `).join("");
+      } else if (currentTab === "refposts") {
+        if (!cache.refposts.length) html = '<div class="empty">暂无参考帖</div>';
+        else html = cache.refposts.map(r => `
+          <div class="list-item ${selectedId === r.id ? "active" : ""}" data-id="${r.id}">
+            <strong>${escapeHtml(r.title || "未命名")}</strong>
+            <span>赞 ${r.liked_count || 0} · ${escapeHtml(r.author_nickname || "")} · ${fmtTime(r.updated_at)}</span>
+          </div>
+        `).join("");
+      } else if (currentTab === "presets") {
+        if (!cache.presets.length) html = '<div class="empty">暂无产品档案</div>';
+        else html = cache.presets.map(p => `
+          <div class="list-item ${selectedId === p.id ? "active" : ""}" data-id="${p.id}">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span>${fmtTime(p.updated_at)}</span>
+          </div>
+        `).join("");
+        } else if (currentTab === "words") {
+          const w = cache.words;
+          const limitCount = Object.keys(w.limit || {}).length;
+          html = `<div class="list-item active" data-id="words">
+          <strong>违禁词 ${(w.forbidden || []).length} 个</strong>
+          <span>限流词 ${limitCount} 个</span>
+        </div>`;
+      }
+      pane.innerHTML = html;
+      pane.querySelectorAll(".list-item").forEach(item => {
+        item.onclick = () => {
+          const id = item.dataset.id;
+          if (currentTab === "sessions") selectedId = id;
+          else if (currentTab === "words") selectedId = "words";
+          else selectedId = Number(id);
+          renderList();
+          loadDetail();
+        };
+      });
+    }
+
+    async function loadDetail() {
+      const pane = $("detailPane");
+      if (selectedId == null) {
+        pane.innerHTML = '<div class="empty">选择一条记录查看详情</div>';
+        return;
+      }
+      pane.innerHTML = '<div class="empty">加载中…</div>';
+      try {
+        if (currentTab === "accounts") {
+          const d = await api(`/accounts/${selectedId}`);
+          const sp = d.style_profile || {};
+          const tags = [...(sp.top_hashtags || []), ...(sp.top_tags || [])];
+          pane.innerHTML = `
+            <div class="detail-title">${escapeHtml(d.nickname)}</div>
+            <div class="detail-meta">
+              用户 ID：${escapeHtml(d.user_id)}<br>
+              粉丝 ${d.follower_count || 0} · 笔记 ${d.note_count || 0}<br>
+              ${escapeHtml(d.bio || "")}
+            </div>
+            <div class="detail-block">
+              <h3>风格摘要</h3>
+              <pre>${escapeHtml(sp.summary || "—")}</pre>
+            </div>
+            ${tags.length ? `<div class="tag-row">${tags.slice(0, 12).map(t => `<span class="tag">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+            <div class="detail-block">
+              <h3>高赞笔记 TOP ${(d.notes || []).length}</h3>
+              ${(d.notes || []).map(n => `
+                <div class="note-row">
+                  <strong>${escapeHtml(n.title || "无标题")}</strong> · 赞 ${n.liked_count || 0}
+                  <div style="color:var(--muted);margin-top:4px">${escapeHtml((n.content || "").slice(0, 120))}${(n.content || "").length > 120 ? "…" : ""}</div>
+                </div>
+              `).join("") || "<span style='color:var(--muted)'>无</span>"}
+            </div>
+            <div class="detail-block">
+              <h3>完整 style_profile JSON</h3>
+              <pre>${escapeHtml(JSON.stringify(sp, null, 2))}</pre>
+            </div>
+          `;
+        } else if (currentTab === "sessions") {
+          const d = await api(`/chat/sessions/${selectedId}`);
+          pane.innerHTML = `
+            <div class="detail-title">${escapeHtml(d.title || "对话")}</div>
+            <div class="detail-meta">会话 ID：${escapeHtml(d.session_id)}<br>关联账号 ID：${d.account_id || "—"}</div>
+            <div class="detail-block">
+              <h3>消息记录（${(d.messages || []).length} 条）</h3>
+              ${(d.messages || []).map(m => `
+                <div class="msg ${m.role === "user" ? "user" : "assistant"}">
+                  <strong>${m.role === "user" ? "用户" : "AI"}</strong>
+                  <div style="margin-top:6px;white-space:pre-wrap">${escapeHtml(m.content)}</div>
+                </div>
+              `).join("") || '<span style="color:var(--muted)">无消息</span>'}
+            </div>
+          `;
+        } else if (currentTab === "refposts") {
+          const d = await api(`/reference-posts/${selectedId}`);
+          const style = d.style_analysis || {};
+          pane.innerHTML = `
+            <div class="detail-title">${escapeHtml(d.title)}</div>
+            <div class="detail-meta">作者 ${escapeHtml(d.author_nickname || "—")} · 赞 ${d.liked_count || 0} · 藏 ${d.collected_count || 0}</div>
+            <div class="detail-block"><h3>正文</h3><pre>${escapeHtml(d.content || d.content_preview || "—")}</pre></div>
+            <div class="detail-block"><h3>风格分析</h3><pre>${escapeHtml(JSON.stringify(style, null, 2))}</pre></div>
+          `;
+        } else if (currentTab === "presets") {
+          const p = cache.presets.find(x => x.id === selectedId);
+          pane.innerHTML = `
+            <div class="detail-title">${escapeHtml(p.name)}</div>
+            <div class="detail-block"><h3>产品 / 服务</h3><pre>${escapeHtml(p.product_desc || "—")}</pre></div>
+            <div class="detail-block"><h3>目标人群</h3><pre>${escapeHtml(p.audience_desc || "—")}</pre></div>
+            <div class="detail-block"><h3>补充说明</h3><pre>${escapeHtml(p.extra_notes || "—")}</pre></div>
+          `;
+        } else if (currentTab === "words") {
+          const w = cache.words;
+          const limit = w.limit || {};
+          pane.innerHTML = `
+            <div class="detail-title">违禁词 / 限流词库</div>
+            <div class="detail-block"><h3>违禁词（${(w.forbidden || []).length}）</h3><pre>${escapeHtml((w.forbidden || []).join("\n"))}</pre></div>
+            <div class="detail-block"><h3>限流词替换表（${Object.keys(limit).length}）</h3><pre>${escapeHtml(JSON.stringify(limit, null, 2))}</pre></div>
+          `;
+        }
+      } catch (e) {
+        pane.innerHTML = `<div class="empty" style="color:#b91c1c">${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function loadTabData() {
+      selectedId = null;
+      $("detailPane").innerHTML = '<div class="empty">选择一条记录查看详情</div>';
+      $("listPane").innerHTML = '<div class="empty">加载中…</div>';
+      const labels = { accounts: "对标账号", sessions: "对话记录", refposts: "参考帖", presets: "产品档案", words: "违禁词库" };
+      $("toolbar").textContent = `当前：${labels[currentTab]}`;
+
+      if (currentTab === "accounts") cache.accounts = await api("/accounts");
+      else if (currentTab === "sessions") cache.sessions = await api("/chat/sessions");
+      else if (currentTab === "refposts") cache.refposts = await api("/reference-posts");
+      else if (currentTab === "presets") cache.presets = await api("/presets");
+      else if (currentTab === "words") {
+        cache.words = await api("/forbidden-words");
+        selectedId = "words";
+      }
+      renderList();
+      if (currentTab === "words") loadDetail();
+    }
+
+    async function refreshAll() {
+      $("refreshBtn").disabled = true;
+      showError("");
+      try {
+        await loadHealth();
+        await loadStats();
+        await loadTabData();
+      } catch (e) {
+        showError("加载失败：" + e.message + "。请确认后端服务已启动。");
+        $("listPane").innerHTML = '<div class="empty">加载失败</div>';
+      } finally {
+        $("refreshBtn").disabled = false;
+      }
+    }
+
+    $("tabs").onclick = (e) => {
+      const tab = e.target.closest(".tab");
+      if (!tab) return;
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      currentTab = tab.dataset.tab;
+      loadTabData();
+    };
+
+    $("refreshBtn").onclick = refreshAll;
+    refreshAll();
+  </script>
+</body>
+</html>
