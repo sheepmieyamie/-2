@@ -111,15 +111,3 @@ class ReferencePost(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
-
-
-class UsageEvent(Base):
-    """匿名客户使用行为（用于产品优化分析）。"""
-
-    __tablename__ = "usage_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    event_type: Mapped[str] = mapped_column(String(64), index=True)
-    client_id: Mapped[str] = mapped_column(String(64), index=True, default="anonymous")
-    meta: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
