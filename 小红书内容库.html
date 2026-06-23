@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>小红书内容库 · AI 文案助手</title>
+  <style>
+    :root {
+      --bg: #faf8f6; --surface: #fff; --border: #eee5e0;
+      --text: #1a1a1a; --muted: #888; --primary: #ff2442;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "PingFang SC", "Noto Sans SC", sans-serif; background: var(--bg); color: var(--text); }
+    .header { background: linear-gradient(135deg, #ff2442, #ff6b6b); color: #fff; padding: 18px 24px; }
+    .header h1 { font-size: 1.3rem; }
+    .header p { font-size: 0.85rem; opacity: 0.9; margin-top: 4px; }
+    .layout { display: flex; height: calc(100vh - 72px); }
+    .sidebar { width: 320px; border-right: 1px solid var(--border); background: var(--surface); overflow-y: auto; padding: 14px; }
+    .panel { background: var(--bg); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+    .panel h2 { font-size: 0.88rem; margin-bottom: 8px; }
+    .hint { font-size: 0.78rem; color: var(--muted); margin-bottom: 8px; }
+    textarea, input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-family: inherit; font-size: 0.9rem; }
+    textarea:disabled, input:disabled { background: #f5f5f5; color: var(--muted); cursor: not-allowed; }
+    textarea:focus { outline: none; border-color: var(--primary); }
+    .btn { border: none; border-radius: 8px; padding: 9px 14px; font-size: 0.88rem; cursor: pointer; background: var(--primary); color: #fff; width: 100%; margin-top: 8px; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .account-item { padding: 10px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+    .account-item:hover { background: #fff; }
+    .account-item.active { background: #fff; border-left: 3px solid var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .account-item img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+    .ref-post-icon {
+      width: 34px; height: 34px; border-radius: 8px; background: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; flex-shrink: 0; border: 1px solid var(--border);
+    }
+    .account-item .info { flex: 1; min-width: 0; }
+    .account-item .info strong { display: block; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .account-item .info span { font-size: 0.72rem; color: var(--muted); }
+    .btn-secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    .btn-row .btn { flex: 1; margin-top: 0; }
+    .field-label { font-size: 0.75rem; color: var(--muted); margin: 8px 0 4px; display: block; }
+    .preset-item { padding: 10px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; display: flex; gap: 8px; align-items: center; }
+    .preset-item:hover { background: #fff; }
+    .preset-item.active { background: #fff; border-left: 3px solid var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .preset-item strong { display: block; font-size: 0.88rem; }
+    .del-btn { background: none; border: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
+    .preset-item span { font-size: 0.72rem; color: var(--muted); display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preset-actions { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
+    .edit-btn { background: none; border: none; color: var(--primary); font-size: 0.75rem; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+    .edit-btn:hover { background: #fff; }
+    .preset-form-panel { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .preset-form-panel.collapsed { display: none; }
+    .btn-add-preset { margin-top: 8px; }
+    .chat { flex: 1; display: flex; min-width: 0; }
+    .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .chat-bar {
+      padding: 10px 20px; background: #fff; border-bottom: 1px solid var(--border);
+      font-size: 0.88rem; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .chat-bar-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .bar-btn {
+      border: 1px solid var(--border); background: #fff; color: var(--text);
+      border-radius: 6px; padding: 5px 12px; font-size: 0.8rem; cursor: pointer;
+    }
+    .bar-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .bar-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .history-panel {
+      width: 272px; border-left: 1px solid var(--border); background: #fff;
+      display: none; flex-direction: column; flex-shrink: 0;
+    }
+    .history-panel.open { display: flex; }
+    .history-header {
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .history-header h3 { font-size: 0.88rem; font-weight: 600; }
+    .history-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .history-item {
+      padding: 10px; border-radius: 8px; cursor: pointer; margin-bottom: 4px;
+      border: 1px solid transparent; position: relative;
+    }
+    .history-item:hover { background: var(--bg); }
+    .history-item.active { background: var(--bg); border-color: var(--border); border-left: 3px solid var(--primary); }
+    .history-item strong {
+      display: block; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; padding-right: 8px;
+    }
+    .history-item:hover strong { padding-right: 44px; }
+    .history-item span { font-size: 0.72rem; color: var(--muted); display: block; margin-top: 3px; }
+    .history-actions {
+      position: absolute; top: 6px; right: 4px; display: flex; gap: 2px;
+      opacity: 0; pointer-events: none; transition: opacity 0.15s;
+    }
+    .history-item:hover .history-actions,
+    .history-item:focus-within .history-actions {
+      opacity: 1; pointer-events: auto;
+    }
+    .history-rename, .history-del {
+      background: none; border: none; color: var(--muted); font-size: 0.82rem;
+      cursor: pointer; line-height: 1; padding: 2px 5px;
+    }
+    .history-rename:hover { color: var(--primary); }
+    .history-del { font-size: 1rem; }
+    .history-del:hover { color: #c62828; }
+    .rename-overlay {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35);
+      display: flex; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .rename-overlay[hidden] { display: none !important; }
+    .rename-dialog {
+      background: #fff; border-radius: 12px; padding: 20px; width: min(360px, 90vw);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+    }
+    .rename-dialog h4 { font-size: 0.95rem; margin-bottom: 12px; }
+    .rename-dialog input {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 0.9rem; margin-bottom: 8px;
+    }
+    .rename-dialog input:focus { outline: none; border-color: var(--primary); }
+    .rename-status { font-size: 0.8rem; color: #c62828; min-height: 1.2em; margin-bottom: 8px; }
+    .rename-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .messages { flex: 1; overflow-y: auto; padding: 20px; }
+    .msg { margin-bottom: 14px; display: flex; }
+    .msg.user { justify-content: flex-end; }
+    .bubble { max-width: 78%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.6; }
+    .msg.user .bubble { background: var(--primary); color: #fff; }
+    .msg.bot .bubble { background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .loading-bubble {
+      display: inline-flex; align-items: center; gap: 8px;
+      min-width: 88px; color: var(--muted); padding: 12px 16px;
+    }
+    .typing-dots { display: inline-flex; gap: 5px; align-items: center; height: 12px; }
+    .typing-dots span {
+      width: 7px; height: 7px; border-radius: 50%; background: #d0d0d0;
+      animation: typing-bounce 1.1s infinite ease-in-out both;
+    }
+    .typing-dots span:nth-child(1) { animation-delay: 0s; }
+    .typing-dots span:nth-child(2) { animation-delay: 0.18s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes typing-bounce {
+      0%, 70%, 100% { transform: translateY(0); opacity: 0.35; }
+      35% { transform: translateY(-6px); opacity: 1; background: var(--primary); }
+    }
+    .badge { display: inline-block; margin-top: 6px; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; }
+    .badge.pass { background: #e8f5e9; color: #2e7d32; }
+    .badge.warn { background: #fff3e0; color: #e65100; }
+    .badge.fail { background: #ffebee; color: #c62828; }
+    .badge.info { background: #e3f2fd; color: #1565c0; }
+    .input-bar { padding: 14px 20px; background: #fff; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+    .input-row { display: flex; gap: 10px; align-items: flex-end; width: 100%; }
+    .input-bar textarea { flex: 1; resize: none; }
+    .input-row .btn { width: auto; margin-top: 0; white-space: nowrap; }
+    .btn-wrap { position: relative; flex-shrink: 0; }
+    .context-menu {
+      position: absolute; bottom: calc(100% + 6px); right: 0;
+      background: #fff; border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1); display: none; min-width: 148px; z-index: 20;
+    }
+    .context-menu.show { display: block; }
+    .context-menu button {
+      display: block; width: 100%; padding: 10px 14px; border: none; background: none;
+      text-align: left; cursor: pointer; font-size: 0.88rem; color: var(--text);
+    }
+    .context-menu button:hover { background: var(--bg); color: var(--primary); }
+    .context-menu .menu-hint {
+      padding: 6px 14px 8px; font-size: 0.72rem; color: var(--muted); border-top: 1px solid var(--border);
+    }
+    .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .tag { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 2px 8px; font-size: 0.72rem; color: var(--primary); }
+    .feature-account-block { margin-bottom: 14px; }
+    .feature-account-block:last-child { margin-bottom: 0; }
+    .feature-account-name { font-size: 0.82rem; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .feature-summary { font-size: 0.78rem; color: var(--muted); margin: 0 0 6px; line-height: 1.45; }
+    .feature-hints { font-size: 0.8rem; padding-left: 16px; margin: 0 0 6px; }
+    .feature-hints li { margin-bottom: 3px; }
+    .status-msg { font-size: 0.8rem; margin-top: 6px; min-height: 1.2em; }
+    .status-msg.error { color: #c62828; }
+    .status-msg.ok { color: #2e7d32; }
+    .status-msg.loading { color: var(--muted); }
+    .welcome { text-align: center; color: var(--muted); padding: 50px 20px; }
+    .welcome h3 { color: var(--text); margin-bottom: 8px; }
+    @media (max-width: 768px) { .layout { flex-direction: column; height: auto; } .sidebar { width: 100%; max-height: 40vh; } }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>📕 小红书内容库</h1>
+    <p>对标账号分析 · DeepSeek 仿写 · 违禁词检测</p>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>添加对标账号</h2>
+        <p class="hint">粘贴小红书主页分享链接（默认抓取最近 50 篇笔记）</p>
+        <textarea id="shareInput" rows="3" placeholder="https://xhslink.com/m/xxxxx"></textarea>
+        <button class="btn" id="addBtn">抓取并分析</button>
+        <p class="status-msg" id="addStatus"></p>
+      </section>
+      <section class="panel">
+        <h2>抓取参考帖</h2>
+        <p class="hint">粘贴单条笔记分享链接，抓取后自动存入「参考帖库」</p>
+        <textarea id="refPostInput" rows="2" placeholder="https://xhslink.com/m/xxxxx（笔记链接）"></textarea>
+        <button class="btn" id="addRefPostBtn" type="button">抓取并分析</button>
+        <p class="status-msg" id="refPostStatus"></p>
+      </section>
+      <section class="panel">
+        <h2>对标账号库</h2>
+        <p class="hint">已保存的对标账号，点选用于分析（可多选）</p>
+        <div id="accountList"><p class="hint">暂无账号</p></div>
+      </section>
+      <section class="panel" id="stylePanel" style="display:none">
+        <h2>对标账号特征</h2>
+        <div id="styleFeatureBody"></div>
+      </section>
+      <section class="panel">
+        <h2>参考帖库</h2>
+        <p class="hint">已保存的参考帖，点选用于仿写分析（可多选）</p>
+        <div id="refPostList"><p class="hint">暂无参考帖</p></div>
+      </section>
+      <section class="panel" id="refPostPanel" style="display:none">
+        <h2>参考帖特征</h2>
+        <div id="refPostFeatureBody"></div>
+      </section>
+      <section class="panel">
+        <h2>产品档案</h2>
+        <p class="hint">已保存档案可点选用于生成；需新建或修改时点下方按钮</p>
+        <div id="presetList"><p class="hint">暂无档案</p></div>
+        <button type="button" class="btn btn-secondary btn-add-preset" id="newPresetBtn">新增档案</button>
+        <p class="status-msg" id="presetStatus"></p>
+        <div class="preset-form-panel collapsed" id="presetFormPanel">
+          <h2 id="presetFormTitle" style="font-size:0.88rem;margin-bottom:8px">新增产品档案</h2>
+          <label class="field-label">档案名称</label>
+          <input id="presetName" placeholder="例：夏季防晒霜 / 旅拍素人号" />
+          <label class="field-label">产品 / 服务描述</label>
+          <textarea id="presetProduct" rows="2" placeholder="产品卖点、成分、价格区间、使用场景…"></textarea>
+          <label class="field-label">目标人群</label>
+          <textarea id="presetAudience" rows="2" placeholder="年龄、性别、痛点、消费习惯…"></textarea>
+          <label class="field-label">补充说明（可选）</label>
+          <textarea id="presetNotes" rows="2" placeholder="语气偏好、禁忌点、竞品差异…"></textarea>
+          <div class="btn-row">
+            <button type="button" class="btn" id="savePresetBtn">保存档案</button>
+            <button type="button" class="btn btn-secondary" id="cancelPresetFormBtn">取消</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <main class="chat">
+      <div class="chat-main">
+        <div class="chat-bar">
+          <div class="chat-bar-text" id="chatBar">请至少选择对标账号或参考帖子之一</div>
+          <div class="chat-actions">
+            <button type="button" class="bar-btn" id="newChatBtn">新对话</button>
+            <button type="button" class="bar-btn" id="toggleHistoryBtn">历史记录</button>
+          </div>
+        </div>
+        <div class="messages" id="messages">
+          <div class="welcome">
+            <h3>👋 开始创作</h3>
+            <p>请至少选择<strong>对标账号</strong>或<strong>参考帖子</strong>之一，支持<strong>多选</strong>；再描述需求开始对话，满意后回复「<strong>出完整方案</strong>」</p>
+          </div>
+        </div>
+        <div class="input-bar">
+          <div class="input-row">
+            <textarea id="chatInput" rows="2" placeholder="本篇帖子需求：写什么主题、什么角度、重点强调什么卖点或场景…"></textarea>
+            <div class="btn-wrap">
+              <button class="btn" id="generateBtn" type="button">开始策划</button>
+              <div class="context-menu" id="generateMenu">
+                <button type="button" data-mode="copy">仅生成文案</button>
+                <button type="button" data-prompt="出完整方案">出完整方案</button>
+                <div class="menu-hint">左键多轮引导 · 右键更多选项</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="history-panel" id="historyPanel">
+        <div class="history-header">
+          <h3>历史记录</h3>
+        </div>
+        <div class="history-list" id="historyList">
+          <p class="hint" style="padding:8px">暂无历史对话</p>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="rename-overlay" id="renameOverlay" hidden>
+    <div class="rename-dialog" role="dialog" aria-modal="true" aria-labelledby="renameDialogTitle">
+      <h4 id="renameDialogTitle">重命名对话</h4>
+      <input id="renameInput" type="text" maxlength="128" placeholder="输入对话名称" />
+      <p class="rename-status" id="renameStatus"></p>
+      <div class="rename-actions">
+        <button type="button" class="btn btn-secondary" id="renameCancelBtn">取消</button>
+        <button type="button" class="btn" id="renameConfirmBtn">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = "/api";
+    let accounts = [];
+    let presets = [];
+    let selectedIds = new Set();
+    let selectedRefPostIds = new Set();
+    const styleRefreshedIds = new Set();
+    let refPosts = [];
+    let selectedPresetId = null;
+    let editingPresetId = null;
+    let sessionId = "";
+    let historySessions = [];
+    let historyPanelOpen = false;
+    let renamingSessionId = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatHistoryTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      if (isToday) {
+        return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      }
+      return d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function formatSelectedNames(ids, list, nameKey, label) {
+      if (!ids.size) return null;
+      const names = [...ids].map(id => {
+        const item = list.find(x => x.id === id);
+        return item ? (item[nameKey] || item.title || "未命名") : null;
+      }).filter(Boolean);
+      if (!names.length) return null;
+      if (names.length <= 2) return `${label}：<strong>${escapeHtml(names.join("、"))}</strong>`;
+      return `${label}：<strong>${escapeHtml(names.slice(0, 2).join("、"))} 等 ${names.length} 个</strong>`;
+    }
+
+    function collectStyleTags(sp, extraTags) {
+      const merged = [...(sp.top_hashtags || []), ...(sp.top_tags || []), ...(extraTags || [])];
+      return [...new Set(merged.filter(Boolean))].slice(0, 10);
+    }
+
+    function renderFeatureAccountBlock(name, summary, hints, tags) {
+      let html = `<div class="feature-account-block">`;
+      html += `<div class="feature-account-name">${escapeHtml(name)}：</div>`;
+      if (summary) html += `<p class="feature-summary">${escapeHtml(summary)}</p>`;
+      if (hints.length) {
+        html += `<ul class="feature-hints">${hints.map(h => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`;
+      }
+      if (tags.length) {
+        html += `<div class="tags">${tags.map(t => `<span class="tag">#${escapeHtml(t)}</span>`).join("")}</div>`;
+      }
+      html += `</div>`;
+      return html;
+    }
+
+    function updateChatBar() {
+      const parts = [];
+      const accountPart = formatSelectedNames(selectedIds, accounts, "nickname", "对标");
+      const refPart = formatSelectedNames(selectedRefPostIds, refPosts, "title", "参考帖");
+      if (accountPart) parts.push(accountPart);
+      if (refPart) parts.push(refPart);
+      if (!selectedIds.size && !selectedRefPostIds.size) {
+        parts.push("未选对标账号 / 参考帖");
+      }
+      if (selectedPresetId) {
+        const p = presets.find(x => x.id === selectedPresetId);
+        if (p) parts.push(`档案：<strong>${p.name}</strong>`);
+      }
+      $("chatBar").innerHTML = parts.join(" · ") || "请至少选择对标账号或参考帖子之一";
+    }
+
+    function showWelcome() {
+      $("messages").innerHTML = `
+        <div class="welcome">
+          <h3>👋 开始创作</h3>
+          <p>请至少选择<strong>对标账号</strong>或<strong>参考帖子</strong>之一，支持<strong>多选</strong>；再描述需求开始对话，满意后回复「<strong>出完整方案</strong>」</p>
+        </div>`;
+    }
+
+    function startNewChat() {
+      sessionId = "";
+      removeLoadingBubble();
+      showWelcome();
+      updateChatBar();
+      renderHistory();
+      scrollMessages();
+    }
+
+    async function loadHistory() {
+      try {
+        historySessions = await fetch(`${API}/chat/sessions`).then(r => r.json());
+      } catch {
+        historySessions = [];
+      }
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const el = $("historyList");
+      if (!historySessions.length) {
+        el.innerHTML = '<p class="hint" style="padding:8px">暂无历史对话</p>';
+        return;
+      }
+      el.innerHTML = historySessions.map(s => `
+        <div class="history-item ${sessionId === s.session_id ? "active" : ""}" data-session="${s.session_id}">
+          <strong>${escapeHtml(s.title)}</strong>
+          <span>${formatHistoryTime(s.updated_at)}${s.account_name ? " · " + escapeHtml(s.account_name) : ""} · ${s.message_count} 条</span>
+          <div class="history-actions">
+            <button type="button" class="history-rename" data-rename-session="${s.session_id}" title="重命名">✎</button>
+            <button type="button" class="history-del" data-del-session="${s.session_id}" title="删除">×</button>
+          </div>
+        </div>
+      `).join("");
+
+      el.querySelectorAll(".history-item").forEach(item => {
+        item.onclick = (e) => {
+          if (e.target.closest("[data-del-session], [data-rename-session]")) return;
+          loadSession(item.dataset.session);
+        };
+      });
+      el.querySelectorAll("[data-rename-session]").forEach(btn => {
+        btn.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); };
+        btn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openRenameDialog(btn.dataset.renameSession);
+        };
+      });
+      el.querySelectorAll("[data-del-session]").forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("确定删除这条历史对话？")) return;
+          await fetch(`${API}/chat/sessions/${btn.dataset.delSession}`, { method: "DELETE" });
+          if (sessionId === btn.dataset.delSession) startNewChat();
+          await loadHistory();
+        };
+      });
+    }
+
+    function openRenameDialog(sid) {
+      renamingSessionId = sid;
+      const session = historySessions.find(s => s.session_id === sid);
+      $("renameInput").value = session ? session.title : "";
+      $("renameStatus").textContent = "";
+      $("renameOverlay").hidden = false;
+      requestAnimationFrame(() => {
+        $("renameInput").focus();
+        $("renameInput").select();
+      });
+    }
+
+    function closeRenameDialog() {
+      renamingSessionId = null;
+      $("renameOverlay").hidden = true;
+      $("renameStatus").textContent = "";
+    }
+
+    async function confirmRename() {
+      if (!renamingSessionId) return;
+      const title = $("renameInput").value.trim();
+      if (!title) {
+        $("renameStatus").textContent = "标题不能为空";
+        $("renameInput").focus();
+        return;
+      }
+      const btn = $("renameConfirmBtn");
+      btn.disabled = true;
+      try {
+        const res = await fetch(`${API}/chat/sessions/${renamingSessionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(parseError(data, "重命名失败"));
+        closeRenameDialog();
+        await loadHistory();
+      } catch (e) {
+        $("renameStatus").textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function loadSession(sid) {
+      try {
+        const res = await fetch(`${API}/chat/sessions/${sid}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(parseError(data, "加载失败"));
+        sessionId = data.session_id;
+        $("messages").innerHTML = "";
+        data.messages.forEach(m => appendMsg(m.role, m.content));
+        if (data.account_id) {
+          selectedIds = new Set([data.account_id]);
+          await updateStylePanel();
+        }
+        renderHistory();
+        updateChatBar();
+        scrollMessages();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function toggleHistoryPanel() {
+      historyPanelOpen = !historyPanelOpen;
+      $("historyPanel").classList.toggle("open", historyPanelOpen);
+      $("toggleHistoryBtn").classList.toggle("active", historyPanelOpen);
+      if (historyPanelOpen) loadHistory();
+    }
+
+    async function loadPresets() {
+      presets = await fetch(`${API}/presets`).then(r => r.json());
+      renderPresets();
+      updateChatBar();
+    }
+
+    function setRefPostStatus(text, type) {
+      const el = $("refPostStatus");
+      el.textContent = text;
+      el.className = "status-msg" + (type ? " " + type : "");
+    }
+
+    async function loadRefPosts() {
+      try {
+        refPosts = await fetch(`${API}/reference-posts`).then(r => r.json());
+      } catch {
+        refPosts = [];
+      }
+      renderRefPosts();
+      updateChatBar();
+    }
+
+    function renderRefPosts() {
+      const el = $("refPostList");
+      if (!refPosts.length) {
+        el.innerHTML = '<p class="hint">暂无参考帖</p>';
+        return;
+      }
+      el.innerHTML = refPosts.map(r => {
+        const isVideo = String(r.note_type || "").toLowerCase().includes("video");
+        const icon = isVideo ? "🎬" : "📝";
+        const typeLabel = isVideo ? "视频" : "图文";
+        return `
+        <div class="account-item ${selectedRefPostIds.has(r.id)?'active':''}" data-ref-id="${r.id}">
+          <div class="ref-post-icon" aria-hidden="true">${icon}</div>
+          <div class="info">
+            <strong>${escapeHtml(r.title || "未命名笔记")}</strong>
+            <span>${r.liked_count || 0} 赞 · ${typeLabel} · ${escapeHtml(r.author_nickname || "未知作者")}</span>
+          </div>
+          <button class="del-btn" data-del-ref="${r.id}">×</button>
+        </div>`;
+      }).join("");
+      el.querySelectorAll("[data-ref-id]").forEach(item => {
+        item.onclick = (e) => {
+          if (e.target.closest("[data-del-ref]")) return;
+          toggleRefPost(Number(item.dataset.refId));
+        };
+      });
+      el.querySelectorAll("[data-del-ref]").forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("确定删除该参考帖？")) return;
+          await fetch(`${API}/reference-posts/${btn.dataset.delRef}`, { method: "DELETE" });
+          if (selectedRefPostIds.has(Number(btn.dataset.delRef))) {
+            selectedRefPostIds.delete(Number(btn.dataset.delRef));
+            updateRefPostPanel();
+          }
+          await loadRefPosts();
+        };
+      });
+    }
+
+    function toggleRefPost(id) {
+      if (selectedRefPostIds.has(id)) selectedRefPostIds.delete(id);
+      else selectedRefPostIds.add(id);
+      renderRefPosts();
+      updateRefPostPanel();
+      updateChatBar();
+    }
+
+    async function updateRefPostPanel() {
+      if (!selectedRefPostIds.size) {
+        $("refPostPanel").style.display = "none";
+        return;
+      }
+      $("refPostPanel").style.display = "block";
+      const blocks = [];
+      for (const id of selectedRefPostIds) {
+        const detail = await fetch(`${API}/reference-posts/${id}`).then(r => r.json());
+        const style = detail.style_analysis || {};
+        const title = detail.title || "未命名笔记";
+        const hints = style.writing_style_hints || [];
+        const tags = collectStyleTags(style, detail.tags);
+        blocks.push(renderFeatureAccountBlock(
+          title,
+          style.summary || detail.content_preview || "",
+          hints,
+          tags
+        ));
+      }
+      $("refPostFeatureBody").innerHTML = blocks.join("");
+    }
+
+    $("addRefPostBtn").onclick = async () => {
+      const text = $("refPostInput").value.trim();
+      if (!text) { setRefPostStatus("请先粘贴笔记分享链接", "error"); return; }
+      $("addRefPostBtn").disabled = true;
+      $("addRefPostBtn").textContent = "抓取分析中…";
+      setRefPostStatus("正在解析笔记，请稍候…", "loading");
+      try {
+        const res = await fetch(`${API}/reference-posts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ share_text: text }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(parseError(data, "抓取失败"));
+        $("refPostInput").value = "";
+        setRefPostStatus(`✅ 已添加「${data.title}」`, "ok");
+        await loadRefPosts();
+        if (data.id) {
+          selectedRefPostIds.add(data.id);
+          renderRefPosts();
+          await updateRefPostPanel();
+          updateChatBar();
+        }
+      } catch (e) {
+        setRefPostStatus("❌ " + e.message, "error");
+        alert(e.message);
+      }
+      $("addRefPostBtn").disabled = false;
+      $("addRefPostBtn").textContent = "抓取并分析";
+    };
+
+    function showPresetForm(mode = "new") {
+      $("presetFormPanel").classList.remove("collapsed");
+      if (mode === "new") {
+        clearPresetFormFields();
+        $("presetFormTitle").textContent = "新增产品档案";
+      } else {
+        $("presetFormTitle").textContent = "编辑产品档案";
+      }
+      $("presetName").focus();
+    }
+
+    function hidePresetForm() {
+      $("presetFormPanel").classList.add("collapsed");
+    }
+
+    function renderPresets() {
+      const el = $("presetList");
+      if (!presets.length) { el.innerHTML = '<p class="hint">暂无档案</p>'; return; }
+      el.innerHTML = presets.map(p => `
+        <div class="preset-item ${selectedPresetId===p.id?'active':''}" data-id="${p.id}">
+          <div style="flex:1;min-width:0">
+            <strong>${p.name}</strong>
+            <span>${p.product_desc || p.audience_desc || "（无描述）"}</span>
+          </div>
+          <div class="preset-actions">
+            <button type="button" class="edit-btn" data-edit-preset="${p.id}">编辑</button>
+            <button type="button" class="del-btn" data-del-preset="${p.id}">×</button>
+          </div>
+        </div>
+      `).join("");
+      el.querySelectorAll(".preset-item").forEach(item => {
+        item.onclick = (e) => {
+          if (e.target.closest("[data-edit-preset]") || e.target.closest("[data-del-preset]")) return;
+          selectPreset(Number(item.dataset.id));
+        };
+      });
+      el.querySelectorAll("[data-edit-preset]").forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          editPreset(Number(btn.dataset.editPreset));
+        };
+      });
+      el.querySelectorAll("[data-del-preset]").forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("确定删除该档案？")) return;
+          await fetch(`${API}/presets/${btn.dataset.delPreset}`, { method: "DELETE" });
+          if (selectedPresetId === Number(btn.dataset.delPreset)) selectedPresetId = null;
+          if (editingPresetId === Number(btn.dataset.delPreset)) cancelPresetForm();
+          await loadPresets();
+        };
+      });
+    }
+
+    function selectPreset(id) {
+      selectedPresetId = id;
+      renderPresets();
+      updateChatBar();
+    }
+
+    function editPreset(id) {
+      const p = presets.find(x => x.id === id);
+      if (!p) return;
+      fillPresetForm(p);
+      showPresetForm("edit");
+      setPresetStatus(`正在编辑「${p.name}」`, "ok");
+    }
+
+    function fillPresetForm(p) {
+      editingPresetId = p.id;
+      $("presetName").value = p.name || "";
+      $("presetProduct").value = p.product_desc || "";
+      $("presetAudience").value = p.audience_desc || "";
+      $("presetNotes").value = p.extra_notes || "";
+      $("savePresetBtn").textContent = "更新档案";
+    }
+
+    function clearPresetFormFields() {
+      editingPresetId = null;
+      $("presetName").value = "";
+      $("presetProduct").value = "";
+      $("presetAudience").value = "";
+      $("presetNotes").value = "";
+      $("savePresetBtn").textContent = "保存档案";
+    }
+
+    function cancelPresetForm() {
+      clearPresetFormFields();
+      hidePresetForm();
+      setPresetStatus("", "");
+    }
+
+    function setPresetStatus(text, type) {
+      const el = $("presetStatus");
+      el.textContent = text;
+      el.className = "status-msg" + (type ? " " + type : "");
+    }
+
+    async function savePreset() {
+      const body = {
+        name: $("presetName").value.trim(),
+        product_desc: $("presetProduct").value.trim(),
+        audience_desc: $("presetAudience").value.trim(),
+        extra_notes: $("presetNotes").value.trim(),
+      };
+      if (!body.name) { setPresetStatus("请填写档案名称", "error"); return; }
+      if (!body.product_desc && !body.audience_desc) {
+        setPresetStatus("请至少填写产品描述或目标人群", "error");
+        return;
+      }
+      const url = editingPresetId ? `${API}/presets/${editingPresetId}` : `${API}/presets`;
+      const method = editingPresetId ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(parseError(data, "保存失败"));
+      await loadPresets();
+      selectedPresetId = data.id;
+      clearPresetFormFields();
+      hidePresetForm();
+      setPresetStatus(`✅ 已保存「${data.name}」并已选中`, "ok");
+      renderPresets();
+      updateChatBar();
+    }
+
+    $("newPresetBtn").onclick = () => {
+      showPresetForm("new");
+      setPresetStatus("", "");
+    };
+    $("savePresetBtn").onclick = () => savePreset().catch(e => setPresetStatus("❌ " + e.message, "error"));
+    $("cancelPresetFormBtn").onclick = cancelPresetForm;
+
+    async function loadAccounts() {
+      accounts = await fetch(`${API}/accounts`).then(r => r.json());
+      renderAccounts();
+    }
+
+    function renderAccounts() {
+      const el = $("accountList");
+      if (!accounts.length) { el.innerHTML = '<p class="hint">暂无账号</p>'; return; }
+      el.innerHTML = accounts.map(a => `
+        <div class="account-item ${selectedIds.has(a.id)?'active':''}" data-id="${a.id}">
+          ${a.avatar ? `<img src="${a.avatar}" alt="">` : ""}
+          <div class="info">
+            <strong>${a.nickname || a.user_id}</strong>
+            <span>${a.follower_count} 粉丝 · ${a.note_count} 笔记</span>
+          </div>
+          <button class="del-btn" data-del="${a.id}">×</button>
+        </div>
+      `).join("");
+      el.querySelectorAll(".account-item").forEach(item => {
+        item.onclick = (e) => {
+          if (e.target.dataset.del) return;
+          toggleAccount(Number(item.dataset.id));
+        };
+      });
+      el.querySelectorAll("[data-del]").forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("确定删除？")) return;
+          await fetch(`${API}/accounts/${btn.dataset.del}`, { method: "DELETE" });
+          selectedIds.delete(Number(btn.dataset.del));
+          await loadAccounts();
+          updateStylePanel();
+          updateChatBar();
+        };
+      });
+    }
+
+    function toggleAccount(id) {
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
+      renderAccounts();
+      updateStylePanel();
+      updateChatBar();
+    }
+
+    async function updateStylePanel() {
+      if (!selectedIds.size) {
+        $("stylePanel").style.display = "none";
+        return;
+      }
+      $("stylePanel").style.display = "block";
+      const blocks = [];
+      let needsRefresh = false;
+      for (const id of selectedIds) {
+        const detail = await fetch(`${API}/accounts/${id}`).then(r => r.json());
+        const sp = detail.style_profile || {};
+        const name = detail.nickname || detail.user_id;
+        const hints = sp.writing_style_hints || [];
+        const tags = collectStyleTags(sp);
+        blocks.push(renderFeatureAccountBlock(name, sp.summary || "", hints, tags));
+        if (!tags.length && !styleRefreshedIds.has(id)) {
+          styleRefreshedIds.add(id);
+          needsRefresh = true;
+          fetch(`${API}/accounts/${id}/refresh-style`, { method: "POST" })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+              if (data && selectedIds.has(id)) updateStylePanel();
+            })
+            .catch(() => {});
+        }
+      }
+      $("styleFeatureBody").innerHTML = blocks.join("");
+      if (needsRefresh) {
+        $("styleFeatureBody").insertAdjacentHTML(
+          "beforeend",
+          `<p class="hint" style="margin-top:8px">正在补拉笔记详情以获取话题标签…</p>`
+        );
+      }
+    }
+
+    function scrollMessages() {
+      const box = $("messages");
+      box.scrollTop = box.scrollHeight;
+    }
+
+    let loadingEl = null;
+
+    function showLoadingBubble(mode = "plan") {
+      removeLoadingBubble();
+      const welcome = document.querySelector(".welcome");
+      if (welcome) welcome.remove();
+      const label = mode === "copy" ? "正在撰写文案" : "正在思考策略";
+      const div = document.createElement("div");
+      div.className = "msg bot";
+      div.id = "chatLoading";
+      div.innerHTML = `
+        <div class="bubble loading-bubble">
+          <span class="typing-label">${label}</span>
+          <span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        </div>`;
+      $("messages").appendChild(div);
+      loadingEl = div;
+      scrollMessages();
+    }
+
+    function removeLoadingBubble() {
+      if (loadingEl) {
+        loadingEl.remove();
+        loadingEl = null;
+      } else {
+        const el = document.getElementById("chatLoading");
+        if (el) el.remove();
+      }
+    }
+
+    function setChatLoading(loading) {
+      $("generateBtn").disabled = loading;
+      $("chatInput").disabled = loading;
+      if (loading) $("generateBtn").textContent = "生成中…";
+      else $("generateBtn").textContent = "开始策划";
+    }
+
+    function stripMarkdown(text) {
+      if (!text) return text;
+      let inTopic = false;
+      return text.split("\n").map(line => {
+        const s = line.trim();
+        if (s.startsWith("【话题标签】")) { inTopic = true; return line; }
+        if (inTopic) {
+          if (s.startsWith("【") && s.endsWith("】")) inTopic = false;
+          else return line;
+        }
+        let out = line.replace(/\*\*/g, "").replace(/__/g, "").replace(/#{2,}/g, "");
+        const m = out.match(/^[ \t]*#{1,6}[ \t]+(.+)$/);
+        if (m) {
+          const title = m[1].trim();
+          out = title.startsWith("【") ? title : `【${title}】`;
+        }
+        return out;
+      }).join("\n");
+    }
+
+    function appendMsg(role, text, risk) {
+      const welcome = document.querySelector(".welcome");
+      if (welcome) welcome.remove();
+      const displayText = role === "bot" ? stripMarkdown(text) : text;
+      const div = document.createElement("div");
+      div.className = `msg ${role === "user" ? "user" : "bot"}`;
+      let badge = "";
+      if (risk) {
+        let cls = "warn";
+        if (risk === "可发布") cls = "pass";
+        else if (risk === "高危") cls = "fail";
+        else if (risk === "策略咨询") cls = "info";
+        else if (risk.startsWith("运营方案")) cls = "pass";
+        badge = `<span class="badge ${cls}">${risk}</span>`;
+      }
+      div.innerHTML = `<div class="bubble">${escapeHtml(displayText)}${badge}</div>`;
+      $("messages").appendChild(div);
+      scrollMessages();
+    }
+
+    function parseError(data, fallback) {
+      if (!data) return fallback;
+      if (typeof data.detail === "string") return data.detail;
+      if (Array.isArray(data.detail)) return data.detail.map(d => d.msg || d).join("; ");
+      return fallback;
+    }
+
+    function setAddStatus(text, type) {
+      const el = $("addStatus");
+      el.textContent = text;
+      el.className = "status-msg" + (type ? " " + type : "");
+    }
+
+    $("addBtn").onclick = async () => {
+      const text = $("shareInput").value.trim();
+      if (!text) { setAddStatus("请先粘贴小红书分享链接", "error"); return; }
+      $("addBtn").disabled = true;
+      $("addBtn").textContent = "抓取分析中…";
+      setAddStatus("正在调用 TikHub 抓取账号数据，请稍候（约 10-30 秒）…", "loading");
+      try {
+        const res = await fetch(`${API}/accounts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ share_text: text, note_limit: 50 }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(parseError(data, `请求失败 (${res.status})`));
+        $("shareInput").value = "";
+        setAddStatus(`✅ 已添加「${data.nickname}」，导入 ${data.notes_imported} 篇笔记`, "ok");
+        await loadAccounts();
+        if (data.id) {
+          selectedIds.add(data.id);
+          renderAccounts();
+          await updateStylePanel();
+          updateChatBar();
+        }
+      } catch (e) {
+        setAddStatus("❌ " + e.message, "error");
+        alert(e.message);
+      }
+      $("addBtn").disabled = false;
+      $("addBtn").textContent = "抓取并分析";
+    };
+
+    async function submit(mode = "plan") {
+      const msg = $("chatInput").value.trim();
+      if (!msg) { alert("请先描述本篇帖子需求"); return; }
+      if (!selectedIds.size && !selectedRefPostIds.size) {
+        alert("请至少选择对标账号或参考帖子之一");
+        return;
+      }
+
+      $("chatInput").value = "";
+      appendMsg("user", msg);
+      setChatLoading(true);
+      showLoadingBubble(mode);
+      try {
+        const res = await fetch(`${API}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: msg,
+            session_id: sessionId,
+            account_ids: [...selectedIds],
+            reference_post_ids: [...selectedRefPostIds],
+            preset_id: selectedPresetId,
+            mode,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(parseError(data, "生成失败"));
+        sessionId = data.session_id;
+        removeLoadingBubble();
+        appendMsg("bot", data.reply, data.risk_level);
+        loadHistory();
+      } catch (e) {
+        removeLoadingBubble();
+        appendMsg("bot", "❌ " + e.message);
+      } finally {
+        setChatLoading(false);
+      }
+    }
+
+    $("newChatBtn").onclick = startNewChat;
+    $("toggleHistoryBtn").onclick = toggleHistoryPanel;
+
+    $("renameCancelBtn").onclick = closeRenameDialog;
+    $("renameConfirmBtn").onclick = confirmRename;
+    $("renameOverlay").onclick = (e) => {
+      if (e.target === $("renameOverlay")) closeRenameDialog();
+    };
+    $("renameInput").onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); confirmRename(); }
+      if (e.key === "Escape") closeRenameDialog();
+    };
+
+    $("generateBtn").onclick = () => submit("plan");
+    $("generateBtn").addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      $("generateMenu").classList.add("show");
+    });
+    document.addEventListener("click", () => $("generateMenu").classList.remove("show"));
+    $("generateMenu").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const promptBtn = e.target.closest("[data-prompt]");
+      if (promptBtn) {
+        $("generateMenu").classList.remove("show");
+        $("chatInput").value = promptBtn.dataset.prompt;
+        submit("plan");
+        return;
+      }
+      const btn = e.target.closest("[data-mode]");
+      if (!btn) return;
+      $("generateMenu").classList.remove("show");
+      submit(btn.dataset.mode);
+    });
+    $("chatInput").onkeydown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit("plan"); }
+    };
+
+    loadAccounts();
+    loadPresets();
+    loadRefPosts();
+    loadHistory();
+  </script>
+</body>
+</html>
