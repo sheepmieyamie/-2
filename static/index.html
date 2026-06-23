@@ -302,6 +302,107 @@
 
   <script>
     const API = "/api";
+    const CLIENT_ID_KEY = "xhs_client_id";
+
+    function ensureClientId() {
+      try {
+        let id = localStorage.getItem(CLIENT_ID_KEY);
+        if (id && /^[a-zA-Z0-9_-]{8,64}$/.test(id)) return id;
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+          id = crypto.randomUUID();
+        } else {
+          id = "c-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+        }
+        localStorage.setItem(CLIENT_ID_KEY, id);
+        return id;
+      } catch {
+        return "fallback-" + Math.random().toString(36).slice(2, 12);
+      }
+    }
+
+    const clientId = ensureClientId();
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      if (url.includes("/api")) {
+        init = init ? { ...init } : {};
+        const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+        try {
+          headers.set("X-Client-Id", clientId);
+        } catch (_) { /* Safari 等环境可能拒绝非法 header 值 */ }
+        init.headers = headers;
+      }
+      return nativeFetch(input, init);
+    };
+
+    function parseError(data, fallback) {
+      if (!data) return fallback;
+      if (typeof data.detail === "string") return data.detail;
+      if (Array.isArray(data.detail)) return data.detail.map(d => d.msg || d).join("; ");
+      return fallback;
+    }
+
+    function friendlyFetchError(err, fallback = "请求失败") {
+      const msg = (err && err.message) || "";
+      if (err && err.name === "AbortError") {
+        return "请求超时，内容生成较久，请稍后重试";
+      }
+      if (/load failed|failed to fetch|networkerror|network error|the internet connection appears to be offline/i.test(msg)) {
+        return "网络连接中断（可能因生成时间较长），请稍后重试";
+      }
+      return msg || fallback;
+    }
+
+    async function apiJson(url, options = {}, opts = {}) {
+      const timeoutMs = opts.timeoutMs ?? 60000;
+      const retries = opts.retries ?? 0;
+      let lastErr;
+
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const res = await nativeFetch(url, {
+            ...options,
+            headers: {
+              "Content-Type": "application/json",
+              "X-Client-Id": clientId,
+              ...(options.headers || {}),
+            },
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          const text = await res.text();
+          let data = {};
+          if (text) {
+            try {
+              data = JSON.parse(text);
+            } catch {
+              if (!res.ok) {
+                throw new Error(`请求失败 (${res.status})`);
+              }
+            }
+          }
+          if (!res.ok) {
+            throw new Error(parseError(data, `请求失败 (${res.status})`));
+          }
+          return data;
+        } catch (err) {
+          clearTimeout(timer);
+          lastErr = err;
+          const retryable = /load failed|failed to fetch|networkerror|network error|abort/i.test(
+            (err && err.message) || ""
+          ) || (err && err.name === "AbortError");
+          if (attempt < retries && retryable) {
+            await new Promise((r) => setTimeout(r, 1500));
+            continue;
+          }
+          throw new Error(friendlyFetchError(err));
+        }
+      }
+      throw new Error(friendlyFetchError(lastErr));
+    }
+
     let accounts = [];
     let presets = [];
     let selectedIds = new Set();
@@ -441,7 +542,7 @@
         btn.onclick = async (e) => {
           e.stopPropagation();
           if (!confirm("确定删除这条历史对话？")) return;
-          await fetch(`${API}/chat/sessions/${btn.dataset.delSession}`, { method: "DELETE" });
+          await fetch(`${API}/chat/sessions/${encodeURIComponent(btn.dataset.delSession)}`, { method: "DELETE" });
           if (sessionId === btn.dataset.delSession) startNewChat();
           await loadHistory();
         };
@@ -477,7 +578,7 @@
       const btn = $("renameConfirmBtn");
       btn.disabled = true;
       try {
-        const res = await fetch(`${API}/chat/sessions/${renamingSessionId}`, {
+        const res = await fetch(`${API}/chat/sessions/${encodeURIComponent(renamingSessionId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title }),
@@ -495,7 +596,7 @@
 
     async function loadSession(sid) {
       try {
-        const res = await fetch(`${API}/chat/sessions/${sid}`);
+        const res = await fetch(`${API}/chat/sessions/${encodeURIComponent(sid)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(parseError(data, "加载失败"));
         sessionId = data.session_id;
@@ -941,13 +1042,6 @@
       scrollMessages();
     }
 
-    function parseError(data, fallback) {
-      if (!data) return fallback;
-      if (typeof data.detail === "string") return data.detail;
-      if (Array.isArray(data.detail)) return data.detail.map(d => d.msg || d).join("; ");
-      return fallback;
-    }
-
     function setAddStatus(text, type) {
       const el = $("addStatus");
       el.textContent = text;
@@ -961,13 +1055,10 @@
       $("addBtn").textContent = "抓取分析中…";
       setAddStatus("正在调用 TikHub 抓取账号数据，请稍候（约 10-30 秒）…", "loading");
       try {
-        const res = await fetch(`${API}/accounts`, {
+        const data = await apiJson(`${API}/accounts`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ share_text: text, note_limit: 50 }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(parseError(data, `请求失败 (${res.status})`));
+        }, { timeoutMs: 120000, retries: 1 });
         $("shareInput").value = "";
         setAddStatus(`✅ 已添加「${data.nickname}」，导入 ${data.notes_imported} 篇笔记`, "ok");
         await loadAccounts();
@@ -998,9 +1089,8 @@
       setChatLoading(true);
       showLoadingBubble(mode);
       try {
-        const res = await fetch(`${API}/chat`, {
+        const data = await apiJson(`${API}/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: msg,
             session_id: sessionId,
@@ -1009,9 +1099,7 @@
             preset_id: selectedPresetId,
             mode,
           }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(parseError(data, "生成失败"));
+        }, { timeoutMs: 180000, retries: 1 });
         sessionId = data.session_id;
         removeLoadingBubble();
         appendMsg("bot", data.reply, data.risk_level);

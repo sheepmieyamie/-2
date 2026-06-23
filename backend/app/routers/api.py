@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -35,8 +35,52 @@ from app.services.strategy import (
     summarize_benchmark_notes,
 )
 from app.services.tikhub import tikhub_client
+from app.tenant import (
+    get_owned_account,
+    get_owned_preset,
+    get_owned_reference_post,
+    owned_accounts,
+    owned_presets,
+    owned_reference_posts,
+    require_client_id,
+    verify_chat_selection,
+    verify_chat_session,
+)
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+def get_client_id(x_client_id: Optional[str] = Header(default=None, alias="X-Client-Id")) -> str:
+    cid = (x_client_id or "anonymous").strip()[:64]
+    return cid or "anonymous"
+
+
+def _ensure_chat_session(db: Session, session_id: str, client_id: str) -> None:
+    meta = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if meta:
+        if meta.client_id and meta.client_id != client_id:
+            raise HTTPException(404, "对话不存在")
+        meta.client_id = client_id
+        meta.updated_at = datetime.utcnow()
+    else:
+        db.add(ChatSession(session_id=session_id, client_id=client_id))
+
+
+def _assert_session_writable(db: Session, session_id: str, client_id: str) -> None:
+    foreign_msg = (
+        db.query(ChatMessage.id)
+        .filter(
+            ChatMessage.session_id == session_id,
+            ChatMessage.client_id != "",
+            ChatMessage.client_id != client_id,
+        )
+        .first()
+    )
+    if foreign_msg:
+        raise HTTPException(404, "对话不存在")
+    meta = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    if meta and meta.client_id and meta.client_id != client_id:
+        raise HTTPException(404, "对话不存在")
 
 
 def normalize_share_text(text: str) -> str:
@@ -111,11 +155,9 @@ class AddAccountRequest(BaseModel):
 
 
 def _load_strategy_context(
-    db: Session, account_id: int, post_number: Optional[int] = None
+    db: Session, client_id: str, account_id: int, post_number: Optional[int] = None
 ) -> tuple[str, dict, dict]:
-    account = db.query(BenchmarkAccount).filter(BenchmarkAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "对标账号不存在")
+    account = get_owned_account(db, client_id, account_id)
 
     style = json.loads(account.style_profile or "{}")
     db_notes = db.query(BenchmarkNote).filter(BenchmarkNote.account_id == account_id).all()
@@ -157,10 +199,8 @@ def _resolve_chat_selection(req: "ChatRequest") -> tuple[list[int], list[int]]:
     return account_ids, reference_post_ids
 
 
-def _load_reference_context(db: Session, reference_post_id: int) -> tuple[str, dict]:
-    post = db.query(ReferencePost).filter(ReferencePost.id == reference_post_id).first()
-    if not post:
-        raise HTTPException(404, "参考帖子不存在")
+def _load_reference_context(db: Session, client_id: str, reference_post_id: int) -> tuple[str, dict]:
+    post = get_owned_reference_post(db, client_id, reference_post_id)
     style = json.loads(post.style_analysis or "{}")
     tags = json.loads(post.tags or "[]")
     context = reference_post_to_context(
@@ -196,6 +236,7 @@ def _reference_post_dict(post: ReferencePost) -> dict:
 def _assemble_generation_context(
     db: Session,
     *,
+    client_id: str,
     account_ids: list[int],
     reference_post_ids: list[int],
     post_number: Optional[int],
@@ -206,11 +247,9 @@ def _assemble_generation_context(
     notes_summaries: list[dict] = []
 
     for aid in account_ids:
-        account = db.query(BenchmarkAccount).filter(BenchmarkAccount.id == aid).first()
-        if not account:
-            raise HTTPException(404, f"对标账号不存在：{aid}")
+        account = get_owned_account(db, client_id, aid)
         strategy_text, style, notes_summary = _load_strategy_context(
-            db, aid, post_number
+            db, client_id, aid, post_number
         )
         nickname = account.nickname or account.user_id
         strategy_parts.append(f"### 对标账号：{nickname}\n{strategy_text}")
@@ -220,10 +259,8 @@ def _assemble_generation_context(
         )
 
     for rid in reference_post_ids:
-        post = db.query(ReferencePost).filter(ReferencePost.id == rid).first()
-        if not post:
-            raise HTTPException(404, f"参考帖子不存在：{rid}")
-        ref_ctx, ref_style = _load_reference_context(db, rid)
+        post = get_owned_reference_post(db, client_id, rid)
+        ref_ctx, ref_style = _load_reference_context(db, client_id, rid)
         reference_parts.append(ref_ctx)
         style_entries.append(
             {
@@ -321,8 +358,12 @@ def _effective_note_count(profile_count: int, imported: int) -> int:
 
 
 @router.get("/accounts")
-def list_accounts(db: Session = Depends(get_db)):
-    accounts = db.query(BenchmarkAccount).order_by(BenchmarkAccount.updated_at.desc()).all()
+def list_accounts(
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    cid = require_client_id(client_id)
+    accounts = owned_accounts(db, cid).order_by(BenchmarkAccount.updated_at.desc()).all()
     imported_map = dict(
         db.query(BenchmarkNote.account_id, func.count(BenchmarkNote.id))
         .group_by(BenchmarkNote.account_id)
@@ -345,10 +386,12 @@ def list_accounts(db: Session = Depends(get_db)):
 
 
 @router.get("/accounts/{account_id}")
-def get_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(BenchmarkAccount).filter(BenchmarkAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "账号不存在")
+def get_account(
+    account_id: int,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    account = get_owned_account(db, require_client_id(client_id), account_id)
 
     notes = (
         db.query(BenchmarkNote)
@@ -388,10 +431,12 @@ def get_account(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/accounts/{account_id}/refresh-style")
-async def refresh_account_style(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(BenchmarkAccount).filter(BenchmarkAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "账号不存在")
+async def refresh_account_style(
+    account_id: int,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    account = get_owned_account(db, require_client_id(client_id), account_id)
 
     db_notes = (
         db.query(BenchmarkNote)
@@ -442,7 +487,12 @@ async def refresh_account_style(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/accounts")
-async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
+async def add_account(
+    req: AddAccountRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    cid = require_client_id(client_id)
     if not req.user_id and not req.share_text:
         raise HTTPException(400, "请提供 user_id 或 share_text（小红书分享链接）")
 
@@ -485,9 +535,11 @@ async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
     profile["note_count"] = _effective_note_count(profile["note_count"], len(all_notes))
     style = analyze_account_style(all_notes, profile)
 
-    account = db.query(BenchmarkAccount).filter(
-        BenchmarkAccount.user_id == profile["user_id"]
-    ).first()
+    account = (
+        owned_accounts(db, cid)
+        .filter(BenchmarkAccount.user_id == profile["user_id"])
+        .first()
+    )
 
     if account:
         account.nickname = profile["nickname"]
@@ -496,6 +548,7 @@ async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
         account.follower_count = profile["follower_count"]
         account.note_count = profile["note_count"]
         account.style_profile = json.dumps(style, ensure_ascii=False)
+        account.client_id = cid
         account.updated_at = datetime.utcnow()
         db.query(BenchmarkNote).filter(BenchmarkNote.account_id == account.id).delete()
     else:
@@ -508,6 +561,7 @@ async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
             note_count=profile["note_count"],
             share_text=share_text or req.share_text,
             style_profile=json.dumps(style, ensure_ascii=False),
+            client_id=cid,
         )
         db.add(account)
         db.flush()
@@ -540,28 +594,38 @@ async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
 
 
 @router.delete("/accounts/{account_id}")
-def delete_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(BenchmarkAccount).filter(BenchmarkAccount.id == account_id).first()
-    if not account:
-        raise HTTPException(404, "账号不存在")
+def delete_account(
+    account_id: int,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    account = get_owned_account(db, require_client_id(client_id), account_id)
     db.delete(account)
     db.commit()
     return {"ok": True}
 
 
 @router.get("/presets")
-def list_presets(db: Session = Depends(get_db)):
-    presets = db.query(ContentPreset).order_by(ContentPreset.updated_at.desc()).all()
+def list_presets(
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    presets = owned_presets(db, require_client_id(client_id)).order_by(ContentPreset.updated_at.desc()).all()
     return [_preset_dict(p) for p in presets]
 
 
 @router.post("/presets")
-def create_preset(req: PresetRequest, db: Session = Depends(get_db)):
+def create_preset(
+    req: PresetRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     preset = ContentPreset(
         name=req.name.strip(),
         product_desc=req.product_desc.strip(),
         audience_desc=req.audience_desc.strip(),
         extra_notes=req.extra_notes.strip(),
+        client_id=require_client_id(client_id),
     )
     db.add(preset)
     db.commit()
@@ -570,10 +634,13 @@ def create_preset(req: PresetRequest, db: Session = Depends(get_db)):
 
 
 @router.put("/presets/{preset_id}")
-def update_preset(preset_id: int, req: PresetRequest, db: Session = Depends(get_db)):
-    preset = db.query(ContentPreset).filter(ContentPreset.id == preset_id).first()
-    if not preset:
-        raise HTTPException(404, "档案不存在")
+def update_preset(
+    preset_id: int,
+    req: PresetRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    preset = get_owned_preset(db, require_client_id(client_id), preset_id)
     preset.name = req.name.strip()
     preset.product_desc = req.product_desc.strip()
     preset.audience_desc = req.audience_desc.strip()
@@ -585,19 +652,24 @@ def update_preset(preset_id: int, req: PresetRequest, db: Session = Depends(get_
 
 
 @router.delete("/presets/{preset_id}")
-def delete_preset(preset_id: int, db: Session = Depends(get_db)):
-    preset = db.query(ContentPreset).filter(ContentPreset.id == preset_id).first()
-    if not preset:
-        raise HTTPException(404, "档案不存在")
+def delete_preset(
+    preset_id: int,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    preset = get_owned_preset(db, require_client_id(client_id), preset_id)
     db.delete(preset)
     db.commit()
     return {"ok": True}
 
 
 @router.get("/reference-posts")
-def list_reference_posts(db: Session = Depends(get_db)):
+def list_reference_posts(
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     posts = (
-        db.query(ReferencePost)
+        owned_reference_posts(db, require_client_id(client_id))
         .order_by(ReferencePost.updated_at.desc())
         .all()
     )
@@ -605,10 +677,12 @@ def list_reference_posts(db: Session = Depends(get_db)):
 
 
 @router.get("/reference-posts/{post_id}")
-def get_reference_post(post_id: int, db: Session = Depends(get_db)):
-    post = db.query(ReferencePost).filter(ReferencePost.id == post_id).first()
-    if not post:
-        raise HTTPException(404, "参考帖子不存在")
+def get_reference_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    post = get_owned_reference_post(db, require_client_id(client_id), post_id)
     data = _reference_post_dict(post)
     data["content"] = post.content
     data["style_analysis"] = json.loads(post.style_analysis or "{}")
@@ -616,7 +690,12 @@ def get_reference_post(post_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/reference-posts")
-async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends(get_db)):
+async def add_reference_post(
+    req: AddReferencePostRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    cid = require_client_id(client_id)
     share_text = normalize_share_text(req.share_text)
     if not share_text:
         raise HTTPException(400, "请粘贴小红书笔记分享链接")
@@ -640,7 +719,7 @@ async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends
 
     style = analyze_reference_post(note)
     existing = (
-        db.query(ReferencePost)
+        owned_reference_posts(db, cid)
         .filter(ReferencePost.note_id == note["note_id"])
         .first()
     )
@@ -656,6 +735,7 @@ async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends
         existing.tags = json.dumps(note.get("tags", []), ensure_ascii=False)
         existing.author_nickname = note.get("author_nickname", "")
         existing.style_analysis = json.dumps(style, ensure_ascii=False)
+        existing.client_id = cid
         existing.updated_at = datetime.utcnow()
         post = existing
     else:
@@ -671,6 +751,7 @@ async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends
             tags=json.dumps(note.get("tags", []), ensure_ascii=False),
             author_nickname=note.get("author_nickname", ""),
             style_analysis=json.dumps(style, ensure_ascii=False),
+            client_id=cid,
         )
         db.add(post)
 
@@ -680,25 +761,31 @@ async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends
 
 
 @router.delete("/reference-posts/{post_id}")
-def delete_reference_post(post_id: int, db: Session = Depends(get_db)):
-    post = db.query(ReferencePost).filter(ReferencePost.id == post_id).first()
-    if not post:
-        raise HTTPException(404, "参考帖子不存在")
+def delete_reference_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    post = get_owned_reference_post(db, require_client_id(client_id), post_id)
     db.delete(post)
     db.commit()
     return {"ok": True}
 
 
 @router.post("/advice")
-async def get_advice(req: AdviceRequest, db: Session = Depends(get_db)):
+async def get_advice(
+    req: AdviceRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    cid = require_client_id(client_id)
     strategy_context, style, notes_summary = _load_strategy_context(
-        db, req.account_id, req.post_number
+        db, cid, req.account_id, req.post_number
     )
     product_context = ""
     if req.preset_id:
-        preset = db.query(ContentPreset).filter(ContentPreset.id == req.preset_id).first()
-        if preset:
-            product_context = preset_to_context(preset)
+        preset = get_owned_preset(db, cid, req.preset_id)
+        product_context = preset_to_context(preset)
 
     reply = await ai_writer.generate_advice(
         strategy_context=strategy_context,
@@ -716,25 +803,47 @@ async def get_advice(req: AdviceRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, db: Session = Depends(get_db)):
+async def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    try:
+        return await _handle_chat(req, db, client_id)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "生成失败，请稍后重试") from exc
+
+
+async def _handle_chat(
+    req: ChatRequest,
+    db: Session,
+    client_id: str,
+):
+    cid = require_client_id(client_id)
     account_ids, reference_post_ids = _resolve_chat_selection(req)
     _require_analysis_source(account_ids, reference_post_ids)
+    verify_chat_selection(db, cid, account_ids, reference_post_ids)
     primary_account_id = account_ids[0] if account_ids else None
 
     session_id = req.session_id or str(uuid.uuid4())
+    _assert_session_writable(db, session_id, cid)
+    _ensure_chat_session(db, session_id, cid)
     product_context = ""
 
     if req.preset_id:
-        preset = db.query(ContentPreset).filter(ContentPreset.id == req.preset_id).first()
-        if preset:
-            product_context = preset_to_context(preset)
+        preset = get_owned_preset(db, cid, req.preset_id)
+        product_context = preset_to_context(preset)
 
     post_number = req.post_number or extract_post_number(req.message)
     parsed_from_message = post_number is not None
 
     history = (
         db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
+        .filter(ChatMessage.session_id == session_id, ChatMessage.client_id == cid)
         .order_by(ChatMessage.created_at.asc())
         .limit(20)
         .all()
@@ -748,6 +857,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
         ctx = _assemble_generation_context(
             db,
+            client_id=cid,
             account_ids=account_ids,
             reference_post_ids=reference_post_ids,
             post_number=post_number,
@@ -767,8 +877,8 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         phase = get_post_phase(post_number) if post_number else None
         stage = "final" if finalize or is_full_plan_reply(reply) else "consult"
 
-        db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id))
-        db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id))
+        db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id, client_id=cid))
+        db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id, client_id=cid))
         db.commit()
 
         report = forbidden_checker.check_report(reply)
@@ -795,6 +905,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     ctx = _assemble_generation_context(
         db,
+        client_id=cid,
         account_ids=account_ids,
         reference_post_ids=reference_post_ids,
         post_number=post_number if parsed_from_message else None,
@@ -810,8 +921,8 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         )
     )
 
-    db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id))
-    db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id))
+    db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id, client_id=cid))
+    db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id, client_id=cid))
     db.commit()
 
     report = forbidden_checker.check_report(reply)
@@ -852,13 +963,19 @@ class RenameSessionRequest(BaseModel):
 
 
 @router.get("/chat/sessions")
-def list_chat_sessions(db: Session = Depends(get_db), limit: int = 50):
+def list_chat_sessions(
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+    limit: int = 50,
+):
+    cid = require_client_id(client_id)
     rows = (
         db.query(
             ChatMessage.session_id,
             func.max(ChatMessage.created_at).label("updated_at"),
             func.count(ChatMessage.id).label("message_count"),
         )
+        .filter(ChatMessage.client_id == cid)
         .group_by(ChatMessage.session_id)
         .order_by(func.max(ChatMessage.created_at).desc())
         .limit(min(limit, 100))
@@ -880,7 +997,7 @@ def list_chat_sessions(db: Session = Depends(get_db), limit: int = 50):
         account_name = ""
         if account_id:
             account = (
-                db.query(BenchmarkAccount)
+                owned_accounts(db, cid)
                 .filter(BenchmarkAccount.id == account_id)
                 .first()
             )
@@ -902,10 +1019,16 @@ def list_chat_sessions(db: Session = Depends(get_db), limit: int = 50):
 
 
 @router.get("/chat/sessions/{session_id}")
-def get_chat_session(session_id: str, db: Session = Depends(get_db)):
+def get_chat_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    cid = require_client_id(client_id)
+    verify_chat_session(db, cid, session_id)
     messages = (
         db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
+        .filter(ChatMessage.session_id == session_id, ChatMessage.client_id == cid)
         .order_by(ChatMessage.created_at.asc())
         .all()
     )
@@ -933,11 +1056,16 @@ def get_chat_session(session_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/chat/sessions/{session_id}")
 def rename_chat_session(
-    session_id: str, req: RenameSessionRequest, db: Session = Depends(get_db)
+    session_id: str,
+    req: RenameSessionRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ):
+    cid = require_client_id(client_id)
+    verify_chat_session(db, cid, session_id)
     exists = (
         db.query(ChatMessage.id)
-        .filter(ChatMessage.session_id == session_id)
+        .filter(ChatMessage.session_id == session_id, ChatMessage.client_id == cid)
         .first()
     )
     if not exists:
@@ -953,27 +1081,37 @@ def rename_chat_session(
         .first()
     )
     if meta:
+        if meta.client_id and meta.client_id != cid:
+            raise HTTPException(404, "对话不存在")
         meta.title = title
+        meta.client_id = cid
         meta.updated_at = datetime.utcnow()
     else:
-        db.add(ChatSession(session_id=session_id, title=title))
+        db.add(ChatSession(session_id=session_id, title=title, client_id=cid))
     db.commit()
 
     return {"session_id": session_id, "title": title}
 
 
 @router.delete("/chat/sessions/{session_id}")
-def delete_chat_session(session_id: str, db: Session = Depends(get_db)):
+def delete_chat_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    cid = require_client_id(client_id)
+    verify_chat_session(db, cid, session_id)
     deleted = (
         db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
+        .filter(ChatMessage.session_id == session_id, ChatMessage.client_id == cid)
         .delete(synchronize_session=False)
     )
     if not deleted:
         raise HTTPException(404, "对话不存在")
-    db.query(ChatSession).filter(ChatSession.session_id == session_id).delete(
-        synchronize_session=False
-    )
+    db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.client_id == cid,
+    ).delete(synchronize_session=False)
     db.commit()
     return {"ok": True}
 

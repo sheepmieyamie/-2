@@ -13,7 +13,7 @@ class BenchmarkAccount(Base):
     __tablename__ = "benchmark_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
     nickname: Mapped[str] = mapped_column(String(128), default="")
     avatar: Mapped[str] = mapped_column(String(512), default="")
     bio: Mapped[str] = mapped_column(Text, default="")
@@ -21,6 +21,7 @@ class BenchmarkAccount(Base):
     note_count: Mapped[int] = mapped_column(Integer, default=0)
     share_text: Mapped[str] = mapped_column(String(512), default="")
     style_profile: Mapped[str] = mapped_column(Text, default="{}")
+    client_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -58,6 +59,7 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     account_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    client_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -69,6 +71,7 @@ class ChatSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(128), default="")
+    client_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
@@ -84,6 +87,7 @@ class ContentPreset(Base):
     product_desc: Mapped[str] = mapped_column(Text, default="")
     audience_desc: Mapped[str] = mapped_column(Text, default="")
     extra_notes: Mapped[str] = mapped_column(Text, default="")
+    client_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -107,6 +111,7 @@ class ReferencePost(Base):
     tags: Mapped[str] = mapped_column(Text, default="[]")
     author_nickname: Mapped[str] = mapped_column(String(128), default="")
     style_analysis: Mapped[str] = mapped_column(Text, default="{}")
+    client_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

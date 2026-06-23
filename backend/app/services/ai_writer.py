@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, APIStatusError, AsyncOpenAI
 
 from app.config import settings
 from app.services.forbidden_words import forbidden_checker
@@ -282,6 +282,8 @@ class AIWriter:
         self.client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            timeout=120.0,
+            max_retries=1,
         )
         self.model = settings.openai_model
         self.wire_api = settings.openai_wire_api
@@ -330,24 +332,32 @@ class AIWriter:
         temperature: float = 0.8,
         max_tokens: int = 4096,
     ) -> str:
-        if self.wire_api == "responses":
-            response = await self.client.responses.create(
-                model=self.model,
-                instructions=system,
-                input=self._to_response_input(messages),
-                reasoning={"effort": self.reasoning_effort},
-                max_output_tokens=max_tokens,
-            )
-            return sanitize_output(_extract_response_text(response))
+        try:
+            if self.wire_api == "responses":
+                response = await self.client.responses.create(
+                    model=self.model,
+                    instructions=system,
+                    input=self._to_response_input(messages),
+                    reasoning={"effort": self.reasoning_effort},
+                    max_output_tokens=max_tokens,
+                )
+                return sanitize_output(_extract_response_text(response))
 
-        api_messages = [{"role": "system", "content": system}, *messages]
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=api_messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return sanitize_output(response.choices[0].message.content or "")
+            api_messages = [{"role": "system", "content": system}, *messages]
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=api_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return sanitize_output(response.choices[0].message.content or "")
+        except APITimeoutError as exc:
+            raise ValueError("AI 接口响应超时，请稍后重试") from exc
+        except APIConnectionError as exc:
+            raise ValueError("无法连接 AI 服务，请检查 API 地址与网络") from exc
+        except APIStatusError as exc:
+            detail = getattr(exc, "message", None) or str(exc)
+            raise ValueError(f"AI 接口错误：{detail}") from exc
 
     async def generate(
         self,

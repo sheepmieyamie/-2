@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.database import Base, engine
+from app.database import Base, engine, migrate_client_id_columns, migrate_tenant_indexes
 from app.routers import api
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -15,6 +15,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 async def lifespan(app: FastAPI):
     (ROOT_DIR / "data").mkdir(exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    migrate_client_id_columns()
+    migrate_tenant_indexes()
     yield
 
 
