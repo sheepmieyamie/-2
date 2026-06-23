@@ -31,7 +31,7 @@ from app.services.strategy import (
     extract_post_number,
     extract_post_number_from_messages,
     get_post_phase,
-    is_full_plan_reply,
+    resolve_consult_stage,
     summarize_benchmark_notes,
 )
 from app.services.tikhub import tikhub_client
@@ -863,6 +863,7 @@ async def _handle_chat(
             post_number=post_number,
         )
         finalize = detect_finalize_intent(req.message)
+        consult_stage = resolve_consult_stage(messages)
 
         reply = sanitize_output(
             await ai_writer.generate_plan_consult(
@@ -872,23 +873,32 @@ async def _handle_chat(
                 product_context=product_context,
                 reference_context=ctx["reference_context"],
                 finalize=finalize,
+                consult_stage=consult_stage,
             )
         )
         phase = get_post_phase(post_number) if post_number else None
-        stage = "final" if finalize or is_full_plan_reply(reply) else "consult"
+        if finalize:
+            stage = "final"
+            risk_level = (
+                f"运营方案 · 第{post_number}篇 · {phase['phase']}"
+                if post_number and phase
+                else "运营方案"
+            )
+        elif consult_stage == "initial":
+            stage = "draft"
+            risk_level = "策略草案"
+        elif consult_stage == "mature":
+            stage = "consult"
+            risk_level = "策略完善 · 可出正式版"
+        else:
+            stage = "consult"
+            risk_level = "策略完善中"
 
         db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id, client_id=cid))
         db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id, client_id=cid))
         db.commit()
 
         report = forbidden_checker.check_report(reply)
-        if stage == "final":
-            if post_number and phase:
-                risk_level = f"运营方案 · 第{post_number}篇 · {phase['phase']}"
-            else:
-                risk_level = "运营方案"
-        else:
-            risk_level = "策略咨询"
 
         return {
             "session_id": session_id,

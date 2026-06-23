@@ -44,6 +44,26 @@ FINALIZE_KEYWORDS = (
     "直接出",
     "可以出了",
     "出完整",
+    "出一版",
+    "出一份",
+)
+
+REFINE_KEYWORDS = (
+    "继续完善",
+    "再改",
+    "改一下",
+    "调整",
+    "不太对",
+    "换一个",
+    "再想想",
+    "优化",
+    "修改",
+    "还想",
+    "再细化",
+    "再聊聊",
+    "再讨论",
+    "补充一下",
+    "不太满意",
 )
 
 
@@ -51,8 +71,54 @@ def detect_finalize_intent(text: str) -> bool:
     return any(kw in text for kw in FINALIZE_KEYWORDS)
 
 
+def detect_refine_intent(text: str) -> bool:
+    return any(kw in text for kw in REFINE_KEYWORDS)
+
+
+def resolve_consult_stage(messages: list[dict[str, str]]) -> str:
+    """对话阶段：首轮草案 → 多轮完善 → 成熟后邀约完整方案 → 定稿。"""
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if not user_msgs:
+        return "initial"
+    current = user_msgs[-1].get("content", "")
+    if detect_finalize_intent(current):
+        return "finalize"
+    if len(user_msgs) == 1:
+        return "initial"
+    if detect_refine_intent(current):
+        return "refine"
+    if len(user_msgs) >= 3:
+        return "mature"
+    return "iterate"
+
+
 def is_full_plan_reply(text: str) -> bool:
-    return "## 📊 对标数据解读" in text and "## 📝 主帖文案" in text
+    return looks_like_full_plan(text)
+
+
+_FULL_PLAN_MARKERS = (
+    "【主帖文案】",
+    "【评论区运营方案】",
+    "【伪素人评论】",
+    "【素人配套号方案】",
+    "【发布与节奏】",
+    "## 📝 主帖文案",
+)
+
+
+def looks_like_full_plan(text: str) -> bool:
+    if not text:
+        return False
+    if "【主帖文案】" in text:
+        return True
+    execution_markers = (
+        "【评论区运营方案】",
+        "【伪素人评论】",
+        "【素人配套号方案】",
+        "【对标数据解读】",
+        "## 📝 主帖文案",
+    )
+    return any(marker in text for marker in execution_markers)
 
 
 def get_post_phase(post_number: int) -> dict[str, str]:

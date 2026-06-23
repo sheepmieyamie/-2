@@ -260,14 +260,14 @@
         <div class="messages" id="messages">
           <div class="welcome">
             <h3>👋 开始创作</h3>
-            <p>请至少选择<strong>对标账号</strong>或<strong>参考帖子</strong>之一，支持<strong>多选</strong>；再描述需求开始对话，满意后回复「<strong>出完整方案</strong>」</p>
+            <p>请至少选择对标账号或参考帖子之一，支持多选；再描述需求开始对话，满意后回复「出完整方案」</p>
           </div>
         </div>
         <div class="input-bar">
           <div class="input-row">
             <textarea id="chatInput" rows="2" placeholder="本篇帖子需求：写什么主题、什么角度、重点强调什么卖点或场景…"></textarea>
             <div class="btn-wrap">
-              <button class="btn" id="generateBtn" type="button">开始策划</button>
+              <button class="btn" id="generateBtn" type="button">发送</button>
               <div class="context-menu" id="generateMenu">
                 <button type="button" data-mode="copy">仅生成文案</button>
                 <button type="button" data-prompt="出完整方案">出完整方案</button>
@@ -513,7 +513,7 @@
       $("messages").innerHTML = `
         <div class="welcome">
           <h3>👋 开始创作</h3>
-          <p>请至少选择<strong>对标账号</strong>或<strong>参考帖子</strong>之一，支持<strong>多选</strong>；再描述需求开始对话，满意后回复「<strong>出完整方案</strong>」</p>
+          <p>请至少选择对标账号或参考帖子之一，支持多选；再描述需求开始对话，满意后回复「出完整方案」</p>
         </div>`;
     }
 
@@ -1068,7 +1068,7 @@
       $("generateBtn").disabled = loading;
       $("chatInput").disabled = loading;
       if (loading) $("generateBtn").textContent = "生成中…";
-      else $("generateBtn").textContent = "开始策划";
+      else $("generateBtn").textContent = "发送";
     }
 
     function stripMarkdown(text) {
@@ -1102,7 +1102,7 @@
         let cls = "warn";
         if (risk === "可发布") cls = "pass";
         else if (risk === "高危") cls = "fail";
-        else if (risk === "策略咨询") cls = "info";
+        else if (risk === "策略咨询" || risk === "策略草案" || risk.startsWith("策略完善")) cls = "info";
         else if (risk.startsWith("运营方案")) cls = "pass";
         badge = `<span class="badge ${cls}">${risk}</span>`;
       }
