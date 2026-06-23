@@ -7,13 +7,20 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import BenchmarkAccount, BenchmarkNote, ChatMessage, ChatSession, ContentPreset, ReferencePost
+from app.models import (
+    BenchmarkAccount,
+    BenchmarkNote,
+    ChatMessage,
+    ChatSession,
+    ContentPreset,
+    ReferencePost,
+)
 from app.services.ai_writer import ai_writer, sanitize_output
 from app.services.analyzer import (
     analyze_account_style,
@@ -35,8 +42,14 @@ from app.services.strategy import (
     summarize_benchmark_notes,
 )
 from app.services.tikhub import tikhub_client
+from app.services.usage import build_analytics, log_usage
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+def get_client_id(x_client_id: Optional[str] = Header(default=None, alias="X-Client-Id")) -> str:
+    cid = (x_client_id or "anonymous").strip()[:64]
+    return cid or "anonymous"
 
 
 def normalize_share_text(text: str) -> str:
@@ -310,6 +323,11 @@ class CheckTextRequest(BaseModel):
     text: str
 
 
+class UsageTrackRequest(BaseModel):
+    event: str = Field(..., min_length=1, max_length=64)
+    meta: dict = Field(default_factory=dict)
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}
@@ -330,6 +348,23 @@ def admin_stats(db: Session = Depends(get_db)):
         "forbidden_words": len(forbidden_checker.forbidden_words),
         "limit_words": len(forbidden_checker.limit_words),
     }
+
+
+@router.post("/usage/track")
+def track_usage(
+    req: UsageTrackRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
+    log_usage(db, req.event, client_id=client_id, meta=req.meta)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/admin/analytics")
+def admin_analytics(db: Session = Depends(get_db), days: int = 30):
+    days = min(max(days, 7), 90)
+    return build_analytics(db, days=days)
 
 
 def _effective_note_count(profile_count: int, imported: int) -> int:
@@ -459,7 +494,11 @@ async def refresh_account_style(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/accounts")
-async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
+async def add_account(
+    req: AddAccountRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     if not req.user_id and not req.share_text:
         raise HTTPException(400, "请提供 user_id 或 share_text（小红书分享链接）")
 
@@ -545,6 +584,12 @@ async def add_account(req: AddAccountRequest, db: Session = Depends(get_db)):
             )
         )
 
+    log_usage(
+        db,
+        "account_scrape_ok",
+        client_id=client_id,
+        meta={"nickname": account.nickname, "notes_imported": len(all_notes)},
+    )
     db.commit()
     db.refresh(account)
 
@@ -573,7 +618,11 @@ def list_presets(db: Session = Depends(get_db)):
 
 
 @router.post("/presets")
-def create_preset(req: PresetRequest, db: Session = Depends(get_db)):
+def create_preset(
+    req: PresetRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     preset = ContentPreset(
         name=req.name.strip(),
         product_desc=req.product_desc.strip(),
@@ -581,6 +630,7 @@ def create_preset(req: PresetRequest, db: Session = Depends(get_db)):
         extra_notes=req.extra_notes.strip(),
     )
     db.add(preset)
+    log_usage(db, "preset_saved", client_id=client_id, meta={"name": preset.name})
     db.commit()
     db.refresh(preset)
     return _preset_dict(preset)
@@ -633,7 +683,11 @@ def get_reference_post(post_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/reference-posts")
-async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends(get_db)):
+async def add_reference_post(
+    req: AddReferencePostRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     share_text = normalize_share_text(req.share_text)
     if not share_text:
         raise HTTPException(400, "请粘贴小红书笔记分享链接")
@@ -691,6 +745,12 @@ async def add_reference_post(req: AddReferencePostRequest, db: Session = Depends
         )
         db.add(post)
 
+    log_usage(
+        db,
+        "ref_post_scrape_ok",
+        client_id=client_id,
+        meta={"title": post.title, "note_id": post.note_id},
+    )
     db.commit()
     db.refresh(post)
     return _reference_post_dict(post)
@@ -733,7 +793,11 @@ async def get_advice(req: AdviceRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, db: Session = Depends(get_db)):
+async def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    client_id: str = Depends(get_client_id),
+):
     account_ids, reference_post_ids = _resolve_chat_selection(req)
     _require_analysis_source(account_ids, reference_post_ids)
     primary_account_id = account_ids[0] if account_ids else None
@@ -786,6 +850,12 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
         db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id))
         db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id))
+        log_usage(
+            db,
+            "chat_plan",
+            client_id=client_id,
+            meta={"stage": stage, "account_count": len(account_ids), "ref_count": len(reference_post_ids)},
+        )
         db.commit()
 
         report = forbidden_checker.check_report(reply)
@@ -829,6 +899,12 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     db.add(ChatMessage(session_id=session_id, role="user", content=req.message, account_id=primary_account_id))
     db.add(ChatMessage(session_id=session_id, role="assistant", content=reply, account_id=primary_account_id))
+    log_usage(
+        db,
+        "chat_copy",
+        client_id=client_id,
+        meta={"account_count": len(account_ids), "ref_count": len(reference_post_ids)},
+    )
     db.commit()
 
     report = forbidden_checker.check_report(reply)
