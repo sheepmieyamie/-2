@@ -1,12 +1,13 @@
-# 后端 API 部署（Render）：https://render.com
-# 静态前端可继续用 Cloudflare Pages，并在 static/_redirects 里把 /api 代理到 Render 地址
+# Render 一键部署（前后端一体，推荐）
+# 使用方式：Render 控制台 → New → Blueprint → 连接本仓库
 services:
   - type: web
-    name: xhs-content-library-api
+    name: xhs-content-library
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: TIKHUB_API_TOKEN
         sync: false

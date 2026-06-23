@@ -52,49 +52,97 @@ npm run dev
 
 浏览器打开 http://localhost:5173
 
-## 线上部署
+## 线上部署（完整功能，推荐）
 
-本项目 = **Python 后端（FastAPI）** + **静态前端（`static/`）**。  
-Cloudflare Pages **只能托管静态页**，不能直接跑 Python；需前后端分开部署。
+本项目后端会**同时托管网页和 API**（`static/` + `/api`），**只部署一个服务即可使用全部功能**，无需 Cloudflare Pages + 后端两套。
 
-### 方案 A：Cloudflare Pages（前端）+ Render（后端 API）
+推荐平台：[Render](https://render.com)（免费档可试用，首次打开可能较慢）。
 
-**1. Cloudflare Pages 设置**
+---
 
-| 项 | 值 |
-|----|-----|
-| 构建命令 | `npm run build` |
-| 构建输出目录 | `dist` |
-| Node 版本 | 18 或以上 |
+### 第一步：准备 API 密钥
 
-仓库根目录已包含 `package.json`，构建会把 `static/` 复制到 `dist/`。
+部署前准备好以下密钥（与本地 `backend/.env` 相同）：
 
-**2. Render 部署后端**
+| 变量名 | 说明 | 获取方式 |
+|--------|------|----------|
+| `TIKHUB_API_TOKEN` | 抓取小红书数据 | [tikhub.io](https://tikhub.io) 注册 |
+| `OPENAI_API_KEY` | AI 生成文案 | 你的 DeepSeek / OpenAI 兼容 API 密钥 |
+| `OPENAI_BASE_URL` | API 地址 | 例：`https://api.deepseek.com/v1` |
 
-在 [Render](https://render.com) 新建 Web Service，连接本仓库，使用根目录的 `render.yaml`，或在面板中设置：
+---
 
-- Root Directory：`backend`
-- Build Command：`pip install -r requirements.txt`
-- Start Command：`uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- 环境变量：参考 `backend/.env.example` 配置 `TIKHUB_API_TOKEN`、`OPENAI_API_KEY` 等
+### 第二步：在 Render 创建服务
 
-**3. 把前端的 `/api` 指到后端**
+**方式 A — Blueprint（最简单）**
 
-部署 Render 后得到地址（如 `https://xxx.onrender.com`），编辑 `static/_redirects`：
+1. 打开 https://dashboard.render.com/
+2. 右上角 **New +** → **Blueprint**
+3. 连接 GitHub 账号，选择仓库 **`sheepmieyamie/-2`**
+4. Render 会读取根目录的 `render.yaml`，点击 **Apply**
+5. 在环境变量页面填入：
+   - `TIKHUB_API_TOKEN`
+   - `OPENAI_API_KEY`
+   - `OPENAI_BASE_URL`（DeepSeek 示例：`https://api.deepseek.com/v1`）
+6. 点击 **Deploy Blueprint**，等待 3～5 分钟
 
-```
-/api/*  https://你的-render-域名.onrender.com/api/:splat  200
-```
+**方式 B — 手动创建 Web Service**
 
-重新推送并触发 Pages 构建后，前端页面的 `/api` 请求会转发到 Render。
+1. **New +** → **Web Service** → 选择仓库 `-2`
+2. 填写：
 
-### 方案 B：仅本机 / 自有服务器
+| 配置项 | 填写内容 |
+|--------|----------|
+| Name | `xhs-content-library`（任意） |
+| Region | Singapore（离国内较近） |
+| Branch | `main` |
+| Root Directory | `backend` |
+| Runtime | `Python 3` |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 
-```bash
-cd backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+3. 展开 **Environment**，添加环境变量（见上表）
+4. 可选：Health Check Path 填 `/api/health`
+5. 点击 **Create Web Service**
 
-访问 `http://服务器IP:8000` 即可（前后端一体）。
+---
+
+### 第三步：验证是否成功
+
+部署完成后，Render 会给你一个地址，例如：
+
+`https://xhs-content-library.onrender.com`
+
+1. 浏览器打开该地址 → 应看到「小红书内容库」页面
+2. 打开 `https://你的地址.onrender.com/api/health` → 应返回 `{"status":"ok"}` 之类 JSON
+3. 在网页里粘贴小红书主页链接 → 点「抓取并分析」→ 能成功说明 TikHub 配置正确
+4. 选对标账号后发一条消息 → 能回复说明 AI 配置正确
+
+---
+
+### 常见问题
+
+**免费版第一次打开很慢？**  
+Render 免费服务闲置后会休眠，首次访问需等待约 30～60 秒唤醒，属正常现象。
+
+**抓取或 AI 报错？**  
+到 Render 控制台 → 你的服务 → **Logs**，查看具体错误；多数是环境变量未填或填错。
+
+**对标账号 / 对话记录会丢吗？**  
+免费版使用 SQLite，**重新部署**时数据可能清空；日常重启一般保留。重要数据请定期在本机备份。
+
+**还想用 Cloudflare Pages？**  
+可以，但需额外配置 `static/_redirects` 把 `/api` 代理到 Render 地址，比单 Render 部署更复杂，一般不必。
+
+---
+
+### 本地 vs 线上
+
+| | 本地 | Render 线上 |
+|--|------|-------------|
+| 启动 | `uvicorn ... --port 8000` | Render 自动启动 |
+| 访问 | http://127.0.0.1:8000 | `https://xxx.onrender.com` |
+| 配置 | `backend/.env` | Render 环境变量面板 |
 
 ## 使用流程
 
