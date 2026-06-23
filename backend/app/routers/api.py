@@ -13,14 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import (
-    BenchmarkAccount,
-    BenchmarkNote,
-    ChatMessage,
-    ChatSession,
-    ContentPreset,
-    ReferencePost,
-)
+from app.models import BenchmarkAccount, BenchmarkNote, ChatMessage, ChatSession, ContentPreset, ReferencePost
 from app.services.ai_writer import ai_writer, sanitize_output
 from app.services.analyzer import (
     analyze_account_style,
