@@ -303,6 +303,31 @@
   <script>
     const API = "/api";
     let accounts = [];
+
+    function getClientId() {
+      let id = localStorage.getItem("xhs_client_id");
+      if (!id) {
+        id = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        localStorage.setItem("xhs_client_id", id);
+      }
+      return id;
+    }
+    const _fetch = window.fetch.bind(window);
+    window.fetch = function(url, opts) {
+      opts = opts || {};
+      if (String(url).includes("/api")) {
+        const headers = new Headers(opts.headers || {});
+        headers.set("X-Client-Id", getClientId());
+        opts.headers = headers;
+      }
+      return _fetch(url, opts);
+    };
+    _fetch(`${API}/usage/track`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Client-Id": getClientId() },
+      body: JSON.stringify({ event: "page_view", meta: { path: location.pathname } }),
+    }).catch(() => {});
+
     let presets = [];
     let selectedIds = new Set();
     let selectedRefPostIds = new Set();
