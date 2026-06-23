@@ -146,8 +146,29 @@
     async function api(path) {
       const res = await fetch(`${API}${path}`);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || `请求失败 ${res.status}`);
+      if (!res.ok) {
+        const msg = typeof data.detail === "string" ? data.detail : `请求失败 ${res.status}`;
+        const err = new Error(msg);
+        err.status = res.status;
+        err.path = path;
+        throw err;
+      }
       return data;
+    }
+
+    function renderStatsCards(s) {
+      $("stats").innerHTML = [
+        ["对标账号", s.accounts],
+        ["笔记样本", s.notes],
+        ["对话会话", s.chat_sessions],
+        ["消息条数", s.chat_messages],
+        ["参考帖", s.reference_posts],
+        ["产品档案", s.presets],
+        ["违禁词", s.forbidden_words],
+        ["限流词", s.limit_words],
+      ].map(([label, value]) => `
+        <div class="stat-card"><div class="label">${label}</div><div class="value">${value ?? "—"}</div></div>
+      `).join("");
     }
 
     async function loadHealth() {
@@ -162,19 +183,30 @@
     }
 
     async function loadStats() {
-      const s = await api("/admin/stats");
-      $("stats").innerHTML = [
-        ["对标账号", s.accounts],
-        ["笔记样本", s.notes],
-        ["对话会话", s.chat_sessions],
-        ["消息条数", s.chat_messages],
-        ["参考帖", s.reference_posts],
-        ["产品档案", s.presets],
-        ["违禁词", s.forbidden_words],
-        ["限流词", s.limit_words],
-      ].map(([label, value]) => `
-        <div class="stat-card"><div class="label">${label}</div><div class="value">${value}</div></div>
-      `).join("");
+      try {
+        const s = await api("/admin/stats");
+        renderStatsCards(s);
+        return;
+      } catch (e) {
+        if (e.status !== 404) throw e;
+      }
+      const [accounts, sessions, refposts, presets, words] = await Promise.all([
+        api("/accounts"),
+        api("/chat/sessions"),
+        api("/reference-posts"),
+        api("/presets"),
+        api("/forbidden-words"),
+      ]);
+      renderStatsCards({
+        accounts: accounts.length,
+        notes: accounts.reduce((n, a) => n + (a.note_count || 0), 0),
+        chat_sessions: sessions.length,
+        chat_messages: sessions.reduce((n, s) => n + (s.message_count || 0), 0),
+        reference_posts: refposts.length,
+        presets: presets.length,
+        forbidden_words: (words.forbidden || []).length,
+        limit_words: Object.keys(words.limit || {}).length,
+      });
     }
 
     function renderList() {
@@ -344,7 +376,8 @@
         await loadStats();
         await loadTabData();
       } catch (e) {
-        showError("加载失败：" + e.message + "。请确认后端服务已启动。");
+        const hint = e.path ? `（${e.path}）` : "";
+        showError("加载失败：" + e.message + hint + "。请确认后端已重启到最新版本。");
         $("listPane").innerHTML = '<div class="empty">加载失败</div>';
       } finally {
         $("refreshBtn").disabled = false;
