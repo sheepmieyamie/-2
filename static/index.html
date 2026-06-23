@@ -317,25 +317,6 @@
 
     const $ = (id) => document.getElementById(id);
 
-    function parseError(data, fallback) {
-      if (!data) return fallback;
-      if (typeof data.detail === "string") return data.detail;
-      if (Array.isArray(data.detail)) return data.detail.map(d => d.msg || d).join("; ");
-      return fallback;
-    }
-
-    async function apiJson(url, opts) {
-      const res = await fetch(url, opts);
-      let data = null;
-      try {
-        data = await res.json();
-      } catch (_) {
-        throw new Error(`服务器响应异常 (${res.status})`);
-      }
-      if (!res.ok) throw new Error(parseError(data, `请求失败 (${res.status})`));
-      return data;
-    }
-
     function escapeHtml(text) {
       const div = document.createElement("div");
       div.textContent = text;
@@ -418,8 +399,7 @@
 
     async function loadHistory() {
       try {
-        const data = await apiJson(`${API}/chat/sessions`);
-        historySessions = Array.isArray(data) ? data : [];
+        historySessions = await fetch(`${API}/chat/sessions`).then(r => r.json());
       } catch {
         historySessions = [];
       }
@@ -461,7 +441,7 @@
         btn.onclick = async (e) => {
           e.stopPropagation();
           if (!confirm("确定删除这条历史对话？")) return;
-          await fetch(`${API}/chat/sessions/${encodeURIComponent(btn.dataset.delSession)}`, { method: "DELETE" });
+          await fetch(`${API}/chat/sessions/${btn.dataset.delSession}`, { method: "DELETE" });
           if (sessionId === btn.dataset.delSession) startNewChat();
           await loadHistory();
         };
@@ -497,7 +477,7 @@
       const btn = $("renameConfirmBtn");
       btn.disabled = true;
       try {
-        const res = await fetch(`${API}/chat/sessions/${encodeURIComponent(renamingSessionId)}`, {
+        const res = await fetch(`${API}/chat/sessions/${renamingSessionId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title }),
@@ -515,7 +495,9 @@
 
     async function loadSession(sid) {
       try {
-        const data = await apiJson(`${API}/chat/sessions/${encodeURIComponent(sid)}`);
+        const res = await fetch(`${API}/chat/sessions/${sid}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(parseError(data, "加载失败"));
         sessionId = data.session_id;
         $("messages").innerHTML = "";
         data.messages.forEach(m => appendMsg(m.role, m.content));
@@ -539,12 +521,7 @@
     }
 
     async function loadPresets() {
-      try {
-        const data = await apiJson(`${API}/presets`);
-        presets = Array.isArray(data) ? data : [];
-      } catch {
-        presets = [];
-      }
+      presets = await fetch(`${API}/presets`).then(r => r.json());
       renderPresets();
       updateChatBar();
     }
@@ -557,8 +534,7 @@
 
     async function loadRefPosts() {
       try {
-        const data = await apiJson(`${API}/reference-posts`);
-        refPosts = Array.isArray(data) ? data : [];
+        refPosts = await fetch(`${API}/reference-posts`).then(r => r.json());
       } catch {
         refPosts = [];
       }
@@ -804,12 +780,7 @@
     $("cancelPresetFormBtn").onclick = cancelPresetForm;
 
     async function loadAccounts() {
-      try {
-        const data = await apiJson(`${API}/accounts`);
-        accounts = Array.isArray(data) ? data : [];
-      } catch {
-        accounts = [];
-      }
+      accounts = await fetch(`${API}/accounts`).then(r => r.json());
       renderAccounts();
     }
 
@@ -968,6 +939,13 @@
       div.innerHTML = `<div class="bubble">${escapeHtml(displayText)}${badge}</div>`;
       $("messages").appendChild(div);
       scrollMessages();
+    }
+
+    function parseError(data, fallback) {
+      if (!data) return fallback;
+      if (typeof data.detail === "string") return data.detail;
+      if (Array.isArray(data.detail)) return data.detail.map(d => d.msg || d).join("; ");
+      return fallback;
     }
 
     function setAddStatus(text, type) {
