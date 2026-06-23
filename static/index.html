@@ -303,6 +303,7 @@
   <script>
     const API = "/api";
     const CLIENT_ID_KEY = "xhs_client_id";
+    const WORKSPACE_KEY = "xhs_workspace";
 
     function ensureClientId() {
       try {
@@ -317,6 +318,33 @@
         return id;
       } catch {
         return "fallback-" + Math.random().toString(36).slice(2, 12);
+      }
+    }
+
+    function readWorkspace() {
+      try {
+        const raw = localStorage.getItem(WORKSPACE_KEY);
+        if (!raw) return null;
+        const ws = JSON.parse(raw);
+        if (!ws || ws.clientId !== clientId) return null;
+        return ws;
+      } catch {
+        return null;
+      }
+    }
+
+    function persistWorkspace() {
+      try {
+        localStorage.setItem(WORKSPACE_KEY, JSON.stringify({
+          clientId,
+          sessionId: sessionId || "",
+          selectedIds: [...selectedIds],
+          selectedRefPostIds: [...selectedRefPostIds],
+          selectedPresetId,
+          savedAt: Date.now(),
+        }));
+      } catch {
+        /* 隐私模式等无法写入时忽略 */
       }
     }
 
@@ -496,6 +524,7 @@
       updateChatBar();
       renderHistory();
       scrollMessages();
+      persistWorkspace();
     }
 
     async function loadHistory() {
@@ -594,7 +623,7 @@
       }
     }
 
-    async function loadSession(sid) {
+    async function loadSession(sid, opts = {}) {
       try {
         const res = await fetch(`${API}/chat/sessions/${encodeURIComponent(sid)}`);
         const data = await res.json();
@@ -606,12 +635,47 @@
           selectedIds = new Set([data.account_id]);
           await updateStylePanel();
         }
+        renderAccounts();
         renderHistory();
         updateChatBar();
         scrollMessages();
+        persistWorkspace();
       } catch (e) {
-        alert(e.message);
+        if (!opts.quiet) alert(e.message);
       }
+    }
+
+    async function restoreWorkspace() {
+      const ws = readWorkspace();
+      if (!ws) return;
+
+      selectedIds = new Set(
+        (ws.selectedIds || []).filter((id) => accounts.some((a) => a.id === id))
+      );
+      selectedRefPostIds = new Set(
+        (ws.selectedRefPostIds || []).filter((id) => refPosts.some((r) => r.id === id))
+      );
+      selectedPresetId =
+        ws.selectedPresetId && presets.some((p) => p.id === ws.selectedPresetId)
+          ? ws.selectedPresetId
+          : null;
+
+      renderAccounts();
+      renderRefPosts();
+      renderPresets();
+      updateChatBar();
+      if (selectedIds.size) await updateStylePanel();
+      if (selectedRefPostIds.size) await updateRefPostPanel();
+
+      const sid = ws.sessionId;
+      if (sid && historySessions.some((s) => s.session_id === sid)) {
+        await loadSession(sid, { quiet: true });
+      }
+    }
+
+    async function bootstrap() {
+      await Promise.all([loadAccounts(), loadPresets(), loadRefPosts(), loadHistory()]);
+      await restoreWorkspace();
     }
 
     function toggleHistoryPanel() {
@@ -689,6 +753,7 @@
       renderRefPosts();
       updateRefPostPanel();
       updateChatBar();
+      persistWorkspace();
     }
 
     async function updateRefPostPanel() {
@@ -736,6 +801,7 @@
           renderRefPosts();
           await updateRefPostPanel();
           updateChatBar();
+          persistWorkspace();
         }
       } catch (e) {
         setRefPostStatus("❌ " + e.message, "error");
@@ -803,6 +869,7 @@
       selectedPresetId = id;
       renderPresets();
       updateChatBar();
+      persistWorkspace();
     }
 
     function editPreset(id) {
@@ -871,6 +938,7 @@
       setPresetStatus(`✅ 已保存「${data.name}」并已选中`, "ok");
       renderPresets();
       updateChatBar();
+      persistWorkspace();
     }
 
     $("newPresetBtn").onclick = () => {
@@ -923,6 +991,7 @@
       renderAccounts();
       updateStylePanel();
       updateChatBar();
+      persistWorkspace();
     }
 
     async function updateStylePanel() {
@@ -1067,6 +1136,7 @@
           renderAccounts();
           await updateStylePanel();
           updateChatBar();
+          persistWorkspace();
         }
       } catch (e) {
         setAddStatus("❌ " + e.message, "error");
@@ -1104,6 +1174,7 @@
         removeLoadingBubble();
         appendMsg("bot", data.reply, data.risk_level);
         loadHistory();
+        persistWorkspace();
       } catch (e) {
         removeLoadingBubble();
         appendMsg("bot", "❌ " + e.message);
@@ -1149,10 +1220,7 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit("plan"); }
     };
 
-    loadAccounts();
-    loadPresets();
-    loadRefPosts();
-    loadHistory();
+    bootstrap();
   </script>
 </body>
 </html>
