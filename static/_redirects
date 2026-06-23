@@ -1,0 +1,2 @@
+# Cloudflare Pages：将 /api 代理到线上后端（部署 Render 后取消注释并改成你的域名）
+# /api/*  https://你的服务名.onrender.com/api/:splat  200

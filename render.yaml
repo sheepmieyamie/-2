@@ -1,0 +1,22 @@
+# 后端 API 部署（Render）：https://render.com
+# 静态前端可继续用 Cloudflare Pages，并在 static/_redirects 里把 /api 代理到 Render 地址
+services:
+  - type: web
+    name: xhs-content-library-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: TIKHUB_API_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.5
+      - key: OPENAI_WIRE_API
+        value: responses
+      - key: OPENAI_REASONING_EFFORT
+        value: high

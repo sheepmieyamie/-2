@@ -52,6 +52,50 @@ npm run dev
 
 浏览器打开 http://localhost:5173
 
+## 线上部署
+
+本项目 = **Python 后端（FastAPI）** + **静态前端（`static/`）**。  
+Cloudflare Pages **只能托管静态页**，不能直接跑 Python；需前后端分开部署。
+
+### 方案 A：Cloudflare Pages（前端）+ Render（后端 API）
+
+**1. Cloudflare Pages 设置**
+
+| 项 | 值 |
+|----|-----|
+| 构建命令 | `npm run build` |
+| 构建输出目录 | `dist` |
+| Node 版本 | 18 或以上 |
+
+仓库根目录已包含 `package.json`，构建会把 `static/` 复制到 `dist/`。
+
+**2. Render 部署后端**
+
+在 [Render](https://render.com) 新建 Web Service，连接本仓库，使用根目录的 `render.yaml`，或在面板中设置：
+
+- Root Directory：`backend`
+- Build Command：`pip install -r requirements.txt`
+- Start Command：`uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- 环境变量：参考 `backend/.env.example` 配置 `TIKHUB_API_TOKEN`、`OPENAI_API_KEY` 等
+
+**3. 把前端的 `/api` 指到后端**
+
+部署 Render 后得到地址（如 `https://xxx.onrender.com`），编辑 `static/_redirects`：
+
+```
+/api/*  https://你的-render-域名.onrender.com/api/:splat  200
+```
+
+重新推送并触发 Pages 构建后，前端页面的 `/api` 请求会转发到 Render。
+
+### 方案 B：仅本机 / 自有服务器
+
+```bash
+cd backend && source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+访问 `http://服务器IP:8000` 即可（前后端一体）。
+
 ## 使用流程
 
 1. 左侧粘贴小红书主页分享链接 → 点击「抓取并分析」

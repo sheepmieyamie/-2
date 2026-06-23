@@ -1,0 +1,12 @@
+{
+  "name": "xhs-content-library",
+  "version": "1.0.0",
+  "private": true,
+  "description": "小红书内容库 — Cloudflare Pages 静态构建",
+  "scripts": {
+    "build": "node scripts/build-pages.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
